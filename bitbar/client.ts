@@ -32,7 +32,8 @@ export interface FileArgs {
 
 export interface UploadFileArgs {
   filename: string;
-  content: string; // base64 encoded content
+  fileContent: string; // base64 encoded content
+  contentType?: string; // MIME type
 }
 
 export interface TestRunArgs {
@@ -63,7 +64,6 @@ export interface DeviceSessionArgs {
 export class BitBarClient implements Client {
   private headers: { 
     "Authorization": string; 
-    "Content-Type": string;
     "User-Agent": string;
   };
   private baseUrl = "https://cloud.bitbar.com/api";
@@ -73,9 +73,30 @@ export class BitBarClient implements Client {
     const encoded = Buffer.from(`${apiKey}:`).toString('base64');
     this.headers = {
       "Authorization": `Basic ${encoded}`,
-      "Content-Type": "application/json",
       "User-Agent": `${MCP_SERVER_NAME}/${MCP_SERVER_VERSION}`,
     };
+  }
+
+  // Helper method to create FormData for file uploads
+  private createFormData(filename: string, fileContent: string, contentType?: string): FormData {
+    try {
+      // Decode base64 content to binary
+      const binaryData = Buffer.from(fileContent, 'base64');
+      
+      // Create FormData and append the file data
+      const formData = new FormData();
+      
+      // Create a Blob from the Buffer for Node.js compatibility
+      const blob = new Blob([binaryData], { type: contentType || 'application/octet-stream' });
+      
+      // Append the file to FormData with filename
+      formData.append('file', blob, filename);
+      
+      return formData;
+    } catch (error) {
+      console.error('Error creating FormData:', error);
+      throw new Error(`Failed to create FormData: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   // User/Account Methods
@@ -182,6 +203,68 @@ export class BitBarClient implements Client {
     return response.json();
   }
 
+  async uploadFile(args: UploadFileArgs): Promise<any> {
+    try {
+      const formData = this.createFormData(args.filename, args.fileContent, args.contentType);
+      
+      // For FormData uploads, we need to omit Content-Type header to let fetch set the boundary
+      const { "Content-Type": _, ...headersWithoutContentType } = this.headers as any;
+      
+      const response = await fetch(`${this.baseUrl}/me/files`, {
+        method: "POST",
+        headers: headersWithoutContentType,
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`BitBar upload failed: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('BitBar upload error:', error);
+      throw error;
+    }
+  }
+
+  async downloadFile(fileId: string): Promise<Blob> {
+    const response = await fetch(`${this.baseUrl}/me/files/${fileId}/file`, {
+      method: "GET",
+      headers: this.headers,
+    });
+    return response.blob();
+  }
+
+  async updateFileName(fileId: string, filename: string): Promise<any> {
+    const body = new URLSearchParams();
+    body.append('name', filename);
+
+    const response = await fetch(`${this.baseUrl}/me/files/${fileId}`, {
+      method: "POST",
+      headers: {
+        ...this.headers,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    });
+    return response.json();
+  }
+
+  async updateFileContent(fileId: string, args: UploadFileArgs): Promise<any> {
+    const formData = this.createFormData(args.filename, args.fileContent, args.contentType);
+    
+    // For FormData uploads, we need to omit Content-Type header to let fetch set the boundary
+    const { "Content-Type": _, ...headersWithoutContentType } = this.headers as any;
+    
+    const response = await fetch(`${this.baseUrl}/me/files/${fileId}/file`, {
+      method: "POST",
+      headers: headersWithoutContentType,
+      body: formData,
+    });
+    return response.json();
+  }
+
   // Framework and Test Methods
   async listFrameworks(): Promise<any> {
     const response = await fetch(`${this.baseUrl}/me/available-frameworks`, {
@@ -194,7 +277,10 @@ export class BitBarClient implements Client {
   async createTestRun(args: CreateTestRunArgs): Promise<any> {
     const response = await fetch(`${this.baseUrl}/me/runs`, {
       method: "POST",
-      headers: this.headers,
+      headers: {
+        ...this.headers,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(args),
     });
     return response.json();
@@ -386,6 +472,88 @@ export class BitBarClient implements Client {
       async (args, _extra) => {
         if (!args.fileId) throw new Error("fileId argument is required");
         const response = await this.getFile(args.fileId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        };
+      }
+    );
+
+    server.tool(
+      "bitbar_upload_file",
+      "Upload a new file to BitBar platform v2",
+      {
+        filename: z.string().describe("Name of the file"),
+        fileContent: z.string().describe("Base64 encoded file content"),
+        contentType: z.string().optional().describe("MIME type of the file"),
+      },
+      async (args, _extra) => {
+        if (!args.filename || !args.fileContent) {
+          throw new Error("filename and fileContent arguments are required");
+        }
+        const response = await this.uploadFile(args as UploadFileArgs);
+        return {
+          content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        };
+      }
+    );
+
+    server.tool(
+      "bitbar_download_file",
+      "Download a file from BitBar",
+      {
+        fileId: z.string().describe("ID of the file to download"),
+      },
+      async (args, _extra) => {
+        if (!args.fileId) throw new Error("fileId argument is required");
+        const blob = await this.downloadFile(args.fileId);
+        const arrayBuffer = await blob.arrayBuffer();
+        const base64Content = Buffer.from(arrayBuffer).toString('base64');
+        return {
+          content: [{ 
+            type: "text", 
+            text: JSON.stringify({
+              contentType: blob.type,
+              size: blob.size,
+              content: base64Content
+            }, null, 2) 
+          }],
+        };
+      }
+    );
+
+    server.tool(
+      "bitbar_update_file_name",
+      "Update the name of an existing file",
+      {
+        fileId: z.string().describe("ID of the file to update"),
+        filename: z.string().describe("New name for the file"),
+      },
+      async (args, _extra) => {
+        if (!args.fileId || !args.filename) {
+          throw new Error("fileId and filename arguments are required");
+        }
+        const response = await this.updateFileName(args.fileId, args.filename);
+        return {
+          content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        };
+      }
+    );
+
+    server.tool(
+      "bitbar_update_file_content",
+      "Update the content of an existing file",
+      {
+        fileId: z.string().describe("ID of the file to update"),
+        filename: z.string().describe("Name of the file"),
+        fileContent: z.string().describe("Base64 encoded new file content"),
+        contentType: z.string().optional().describe("MIME type of the file"),
+      },
+      async (args, _extra) => {
+        if (!args.fileId || !args.filename || !args.fileContent) {
+          throw new Error("fileId, filename, and fileContent arguments are required");
+        }
+        const { fileId, ...uploadArgs } = args;
+        const response = await this.updateFileContent(fileId, uploadArgs as UploadFileArgs);
         return {
           content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
         };
