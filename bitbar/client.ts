@@ -99,6 +99,40 @@ export class BitBarClient implements Client {
     }
   }
 
+  // Helper method to fetch all pages from a paginated endpoint
+  private async fetchAllPages(endpoint: string, pageSize: number = 100): Promise<any> {
+    const allItems: any[] = [];
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const url = `${this.baseUrl}${endpoint}${endpoint.includes('?') ? '&' : '?'}limit=${pageSize}&offset=${offset}`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: this.headers,
+      });
+      
+      const pageData = await response.json();
+      
+      if (pageData.data && Array.isArray(pageData.data)) {
+        allItems.push(...pageData.data);
+      }
+      
+      // Check if there are more pages
+      hasMore = pageData.data && pageData.data.length === pageSize && offset + pageSize < pageData.total;
+      offset += pageSize;
+    }
+
+    // Return the same structure as the original API but with all items
+    return {
+      data: allItems,
+      total: allItems.length,
+      limit: allItems.length,
+      offset: 0,
+      empty: allItems.length === 0
+    };
+  }
+
   // User/Account Methods
   async getUser(): Promise<any> {
     const response = await fetch(`${this.baseUrl}/me`, {
@@ -163,11 +197,7 @@ export class BitBarClient implements Client {
 
   // Device Management Methods
   async listDevices(): Promise<any> {
-    const response = await fetch(`${this.baseUrl}/devices`, {
-      method: "GET",
-      headers: this.headers,
-    });
-    return response.json();
+    return this.fetchAllPages('/devices');
   }
 
   async listDeviceGroups(): Promise<any> {
@@ -413,7 +443,7 @@ export class BitBarClient implements Client {
     // Device Management Tools
     server.tool(
       "bitbar_list_devices",
-      "List all available BitBar devices",
+      "List all available BitBar devices supporting pagination",
       {},
       async (_args, _extra) => {
         const response = await this.listDevices();
@@ -480,7 +510,7 @@ export class BitBarClient implements Client {
 
     server.tool(
       "bitbar_upload_file",
-      "Upload a new file to BitBar platform v2",
+      "Upload a new file to BitBar",
       {
         filename: z.string().describe("Name of the file"),
         fileContent: z.string().describe("Base64 encoded file content"),
