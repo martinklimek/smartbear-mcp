@@ -80,21 +80,44 @@ export class BitBarClient implements Client {
   // Helper method to create FormData for file uploads
   private createFormData(filename: string, fileContent: string, contentType?: string): FormData {
     try {
+      console.log('[BitBar FormData] Creating FormData for:', filename);
+      console.log('[BitBar FormData] Content type:', contentType || 'application/octet-stream');
+      console.log('[BitBar FormData] Content length (base64):', fileContent.length);
+      
+      // Add file size validation to prevent memory issues
+      const maxFileSize = 100 * 1024 * 1024; // 100MB limit for base64 content
+      if (fileContent.length > maxFileSize) {
+        throw new Error(`File too large: ${fileContent.length} bytes (max: ${maxFileSize} bytes)`);
+      }
+      
+      // Validate base64 format
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(fileContent)) {
+        throw new Error('Invalid base64 content format');
+      }
+      
       // Decode base64 content to binary
       const binaryData = Buffer.from(fileContent, 'base64');
+      console.log('[BitBar FormData] Binary data length:', binaryData.length);
+      
+      // Additional validation for decoded size
+      if (binaryData.length > 50 * 1024 * 1024) { // 50MB limit for actual file
+        throw new Error(`Decoded file too large: ${binaryData.length} bytes (max: 50MB)`);
+      }
       
       // Create FormData and append the file data
       const formData = new FormData();
       
       // Create a Blob from the Buffer for Node.js compatibility
       const blob = new Blob([binaryData], { type: contentType || 'application/octet-stream' });
+      console.log('[BitBar FormData] Blob created, size:', blob.size);
       
       // Append the file to FormData with filename
       formData.append('file', blob, filename);
+      console.log('[BitBar FormData] FormData created successfully');
       
       return formData;
     } catch (error) {
-      console.error('Error creating FormData:', error);
+      console.error('[BitBar FormData] Error creating FormData:', error);
       throw new Error(`Failed to create FormData: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -235,10 +258,16 @@ export class BitBarClient implements Client {
 
   async uploadFile(args: UploadFileArgs): Promise<any> {
     try {
+      console.log('[BitBar Upload] Starting upload process...');
+      console.log('[BitBar Upload] Filename:', args.filename);
+      console.log('[BitBar Upload] Content length:', args.fileContent?.length || 0);
+      
       const formData = this.createFormData(args.filename, args.fileContent, args.contentType);
+      console.log('[BitBar Upload] FormData created successfully');
       
       // For FormData uploads, we need to omit Content-Type header to let fetch set the boundary
       const { "Content-Type": _, ...headersWithoutContentType } = this.headers as any;
+      console.log('[BitBar Upload] Headers prepared, starting fetch...');
       
       const response = await fetch(`${this.baseUrl}/me/files`, {
         method: "POST",
@@ -246,14 +275,19 @@ export class BitBarClient implements Client {
         body: formData,
       });
       
+      console.log('[BitBar Upload] Fetch completed, status:', response.status);
+      
       if (!response.ok) {
         const errorText = await response.text();
+        console.log('[BitBar Upload] Error response:', errorText);
         throw new Error(`BitBar upload failed: ${response.status} ${response.statusText} - ${errorText}`);
       }
       
-      return response.json();
+      const result = await response.json();
+      console.log('[BitBar Upload] Upload successful, file ID:', result.id);
+      return result;
     } catch (error) {
-      console.error('BitBar upload error:', error);
+      console.error('[BitBar Upload] Upload error:', error);
       throw error;
     }
   }
@@ -512,18 +546,117 @@ export class BitBarClient implements Client {
       "bitbar_upload_file",
       "Upload a new file to BitBar",
       {
-        filename: z.string().describe("Name of the file"),
-        fileContent: z.string().describe("Base64 encoded file content"),
-        contentType: z.string().optional().describe("MIME type of the file"),
+        filePath: z.string().describe("Path to the file to upload"),
+        filename: z.string().optional().describe("Custom filename (optional, will use file basename if not provided)"),
+        contentType: z.string().optional().describe("MIME type of the file (optional, will be auto-detected)"),
       },
       async (args, _extra) => {
-        if (!args.filename || !args.fileContent) {
-          throw new Error("filename and fileContent arguments are required");
+        try {
+          console.log('[BitBar MCP] Upload tool called with file path:', args.filePath);
+          
+          if (!args.filePath) {
+            throw new Error("filePath argument is required");
+          }
+          
+          // Additional validation
+          if (typeof args.filePath !== 'string' || args.filePath.trim() === '') {
+            throw new Error("filePath must be a non-empty string");
+          }
+          
+          // Import fs module
+          const fs = await import('fs');
+          const path = await import('path');
+          
+          // Check if file exists
+          if (!fs.existsSync(args.filePath)) {
+            throw new Error(`File not found: ${args.filePath}`);
+          }
+          
+          // Get file stats
+          const stats = fs.statSync(args.filePath);
+          if (!stats.isFile()) {
+            throw new Error(`Path is not a file: ${args.filePath}`);
+          }
+          
+          // Check file size (50MB limit)
+          const maxFileSize = 50 * 1024 * 1024; // 50MB
+          if (stats.size > maxFileSize) {
+            throw new Error(`File too large: ${stats.size} bytes (max: ${maxFileSize} bytes)`);
+          }
+          
+          console.log('[BitBar MCP] File size:', stats.size, 'bytes');
+          
+          // Determine filename
+          const filename = args.filename || path.basename(args.filePath);
+          console.log('[BitBar MCP] Using filename:', filename);
+          
+          // Read file and convert to base64
+          const fileBuffer = fs.readFileSync(args.filePath);
+          const base64Content = fileBuffer.toString('base64');
+          console.log('[BitBar MCP] File converted to base64, length:', base64Content.length);
+          
+          // Auto-detect content type if not provided
+          let contentType = args.contentType;
+          if (!contentType) {
+            const ext = path.extname(args.filePath).toLowerCase();
+            const mimeTypes: { [key: string]: string } = {
+              '.txt': 'text/plain',
+              '.json': 'application/json',
+              '.js': 'application/javascript',
+              '.html': 'text/html',
+              '.css': 'text/css',
+              '.xml': 'application/xml',
+              '.zip': 'application/zip',
+              '.apk': 'application/vnd.android.package-archive',
+              '.ipa': 'application/octet-stream',
+              '.jar': 'application/java-archive',
+              '.png': 'image/png',
+              '.jpg': 'image/jpeg',
+              '.jpeg': 'image/jpeg',
+              '.gif': 'image/gif',
+              '.pdf': 'application/pdf'
+            };
+            contentType = mimeTypes[ext] || 'application/octet-stream';
+          }
+          console.log('[BitBar MCP] Using content type:', contentType);
+          
+          // Add timeout to prevent hanging
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('BitBar upload timed out after 30 seconds')), 30000);
+          });
+          
+          console.log('[BitBar MCP] Starting upload...');
+          const uploadPromise = this.uploadFile({
+            filename,
+            fileContent: base64Content,
+            contentType
+          });
+          const response = await Promise.race([uploadPromise, timeoutPromise]);
+          
+          console.log('[BitBar MCP] Upload completed successfully');
+          return {
+            content: [{ type: "text", text: JSON.stringify({
+              ...response,
+              originalPath: args.filePath,
+              uploadedSize: stats.size
+            }, null, 2) }],
+          };
+        } catch (error) {
+          console.error('[BitBar MCP] Upload error:', error);
+          // Ensure we always return a response, even on error
+          const errorMessage = error instanceof Error ? error.message : 'Unknown upload error';
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({ 
+                error: true, 
+                message: errorMessage,
+                timestamp: new Date().toISOString(),
+                filePath: args.filePath
+              }, null, 2) 
+            }],
+          };
         }
-        const response = await this.uploadFile(args as UploadFileArgs);
-        return {
-          content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
-        };
       }
     );
 
