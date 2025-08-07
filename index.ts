@@ -55,6 +55,9 @@ async function main() {
     await insightHubClient.initialize();
     insightHubClient.registerTools(server);
     insightHubClient.registerResources(server);
+    if (insightHubClient.registerPrompts) {
+      insightHubClient.registerPrompts(server);
+    }
   }
 
  if(apiHubToken) {
