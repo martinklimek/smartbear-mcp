@@ -7,7 +7,7 @@ import Bugsnag from "../common/bugsnag.js";
 import NodeCache from "node-cache";
 import { Organization, Project } from "./client/api/CurrentUser.js";
 import { EventField, ProjectAPI } from "./client/api/Project.js";
-import { FilterObjectSchema } from "./client/api/filters.js";
+import { FilterObject, FilterObjectSchema, toQueryString } from "./client/api/filters.js";
 import { toolDescriptionTemplate, createParameter, createExample } from "../common/templates.js";
 
 const HUB_PREFIX = "00000";
@@ -123,8 +123,9 @@ export class InsightHubClient implements Client {
     return `${this.appEndpoint}/${(await this.getOrganization()).slug}/${project.slug}`;
   }
 
-  async getErrorUrl(project: Project, errorId: string): Promise<string> {
-    return `${await this.getDashboardUrl(project)}/errors/${errorId}`;
+  async getErrorUrl(project: Project, errorId: string, queryString = ''): Promise<string> {
+    const dashboardUrl = await this.getDashboardUrl(project);
+    return `${dashboardUrl}/errors/${errorId}${queryString}`;
   }
 
   async getOrganization(): Promise<Organization> {
@@ -311,10 +312,11 @@ export class InsightHubClient implements Client {
       "get_insight_hub_error",
       {
         description: toolDescriptionTemplate({
-          summary: "Get aggregate information about an error from a project, including detailed information on latest event (occurrence)",
-          purpose: "Retrieve error details including metadata, breadcrumb and context for debugging.",
+          summary: "Get full details on an error, including aggregated and summarised data across all events (occurrences) and details of the latest event (occurrence), such as breadcrumbs, metadata and the stacktrace. Use the filters parameter to narrow down the summaries further.",
+          purpose: "Retrieve all the information required on a specified error to understand who it is affecting and why.",
           useCases: [
             "Investigate a specific error found through list_insight_hub_project_errors",
+            "Understand which types of user are affected by the error using summarised event data",
             "Get error details for debugging and root cause analysis",
             "Retrieve error metadata for incident reports and documentation"
           ],
@@ -335,11 +337,31 @@ export class InsightHubClient implements Client {
                 true,
                 "ID of the project containing the error",
               )
-            ])
+            ]),
+             createParameter(
+              "filters",
+              "FilterObject",
+              false,
+              "Apply filters to narrow down the error list. Use get_project_event_filters to discover available filter fields",
+              {
+                examples: [
+                  '{"error.status": [{"type": "eq", "value": "open"}]}',
+                  '{"event.since": [{"type": "eq", "value": "7d"}]} // Relative time: last 7 days',
+                  '{"event.since": [{"type": "eq", "value": "2018-05-20T00:00:00Z"}]} // ISO 8601 UTC format',
+                  '{"user.email": [{"type": "eq", "value": "user@example.com"}]}'
+                ],
+                constraints: [
+                  "Time filters support ISO 8601 format (e.g. 2018-05-20T00:00:00Z) or relative format (e.g. 7d, 24h)",
+                  "ISO 8601 times must be in UTC and use extended format",
+                  "Relative time periods: h (hours), d (days)"
+                ]
+              }
+            )
           ],
           outputFormat: "JSON object containing: " +
             " - error_details: Aggregated data about the error, including first and last seen occurrence" +
             " - latest_event: Detailed information about the most recent occurrence of the error, including stacktrace, breadcrumbs, user and context" +
+            " - pivots: List of pivots (summaries) for the error, which can be used to analyze patterns in occurrences" +
             " - url: A link to the error in the Insight Hub dashboard - this should be shown to the user for them to perform further analysis",
           examples: [
             createExample(
@@ -353,6 +375,7 @@ export class InsightHubClient implements Client {
           hints: [
             "Error IDs can be found using the list_insight_hub_project_errors tool",
             "Use this after filtering errors to get detailed information about specific errors",
+            "If you used a filter to get this error, you can pass the same filters here to restrict the results or apply further filters",
             "The response also includes the latest event for the error, do not call get_insight_hub_error_latest_event afterwards as this will be redundant",
             "The URL provided in the response points should be shown to the user in all cases as it allows them to view the error in the Insight Hub dashboard and perform further analysis",
           ]
@@ -360,6 +383,7 @@ export class InsightHubClient implements Client {
         inputSchema: {
           errorId: z.string().describe("ID of the error to fetch"),
           ...(!this.projectApiKey ? { projectId: z.string().optional().describe("ID of the project") } : {}),
+          filters: FilterObjectSchema.optional().describe("Filters to apply to the error list. Valid filters for a project can be found in the `get_project_event_filters` tool.")
         }
       },
       async (args, _extra) => {
@@ -370,10 +394,40 @@ export class InsightHubClient implements Client {
           if (!errorDetails) {
             throw new Error(`Error with ID ${args.errorId} not found in project ${project.id}.`);
           }
+
+          // Build query parameters
+          const params = new URLSearchParams();
+          
+          // Add sorting and pagination parameters to get the latest event
+          params.append('sort', 'timestamp');
+          params.append('direction', 'desc');
+          params.append('per_page', '1');
+          params.append('full_reports', 'true');
+
+          const filters: FilterObject = {
+            "error": [{ type: "eq", value: args.errorId }],
+            ...args.filters
+          }
+
+          const filtersQueryString = toQueryString(filters);
+          const listEventsQueryString = `?${params}&${filtersQueryString}`;
+
+          // Get the latest event for this error using the events endpoint with filters
+          let latestEvent = null;
+          try {
+            const eventsResponse = await this.errorsApi.listEventsOnProject(project.id, listEventsQueryString);
+            const events = eventsResponse.body || [];
+            latestEvent = events[0] || null;
+          } catch (e) {
+            console.warn("Failed to fetch latest event:", e);
+            // Continue without latest event rather than failing the entire request
+          }
+
           const content = {
             error_details: errorDetails,
-            latest_event: (await this.errorsApi.viewLatestEventOnError(args.errorId)).body,
-            url: await this.getErrorUrl(project, args.errorId),
+            latest_event: latestEvent,
+            pivots: (await this.errorsApi.listErrorPivots(project.id, args.errorId)).body || [],
+            url: await this.getErrorUrl(project, args.errorId, `?${filtersQueryString}`),
           }
           return {
             content: [{ type: "text", text: JSON.stringify(content) }]
@@ -384,59 +438,7 @@ export class InsightHubClient implements Client {
         }
       }
     );
-    server.registerTool(
-      "get_insight_hub_error_latest_event",
-      {
-        description: toolDescriptionTemplate({
-          summary: "Get the most recent event of a specific error",
-          purpose: "Retrieve the latest event (occurrence) of an error to understand when it last happened and its details",
-          useCases: [
-            "Get the most recent occurrence of an error for immediate debugging",
-            "Understand the latest context and stack trace for an ongoing issue",
-            "Check when an error last occurred and with what parameters"
-          ],
-          parameters: [
-            createParameter(
-              "errorId",
-              "string",
-              true,
-              "Unique identifier of the error to get the latest event for",
-              {
-                examples: ["6863e2af8c857c0a5023b411"]
-              }
-            )
-          ],
-          examples: [
-            createExample(
-              "Get the latest event for an error",
-              {
-                errorId: "6863e2af8c857c0a5023b411"
-              },
-              "JSON object with the most recent event details including timestamp, stack trace, and context"
-            )
-          ],
-          hints: [
-            "This shows the most recent occurrence - use get_insight_hub_error for aggregated details of all events grouped into the error",
-            "The event includes detailed context like user information, request data, and environment details"
-          ]
-        }),
-        inputSchema: {
-          errorId: z.string().describe("ID of the error to get the latest event for"),
-        }
-      },
-      async (args, _extra) => {
-        try {
-          if (!args.errorId) throw new Error("errorId argument is required");
-          const response = (await this.errorsApi.viewLatestEventOnError(args.errorId)).body;
-          return {
-            content: [{ type: "text", text: JSON.stringify(response) }],
-          };
-        } catch (e) {
-          Bugsnag.notify(e as unknown as Error);
-          throw e;
-        }
-      }
-    );
+
     server.registerTool(
       "get_insight_hub_event_details",
       {
