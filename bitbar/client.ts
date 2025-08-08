@@ -395,6 +395,176 @@ export class BitBarClient implements Client {
     return response.json();
   }
 
+  // Helper method to convert human-written test steps to Appium code
+  private convertHumanStepsToAppium(humanSteps: string): string {
+    console.log('[BitBar StepConverter] Converting human-written steps to Appium code');
+    
+    try {
+      // Split steps by numbered lines (1., 2., etc.) or newlines
+      const steps = humanSteps
+        .split(/\n|(?=\d+\.)/g)
+        .map(step => step.trim())
+        .filter(step => step.length > 0);
+      
+      const appiumCode: string[] = [];
+      let stepNumber = 1;
+      
+      for (const step of steps) {
+        // Remove step numbering if present (1., 2., etc.)
+        const cleanStep = step.replace(/^\d+\.\s*/, '').trim();
+        if (!cleanStep) continue;
+        
+        console.log(`[BitBar StepConverter] Processing step ${stepNumber}: ${cleanStep}`);
+        
+        // Convert common human actions to Appium code
+        const lowerStep = cleanStep.toLowerCase();
+        let appiumCommand = '';
+        
+        if (lowerStep.includes('tap') || lowerStep.includes('click')) {
+          // Extract element identifier
+          if (lowerStep.includes('button')) {
+            const buttonMatch = cleanStep.match(/(?:tap|click)(?:\s+on)?(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|\b(\w+(?:\s+\w+)*?))\s*(?:button|btn)/i);
+            const buttonText = buttonMatch?.[1] || buttonMatch?.[2] || buttonMatch?.[3] || 'button';
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Tapping on button: ${buttonText}")
+            button = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${buttonText}")
+            button.click()
+            sleep(2)`;
+          } else if (lowerStep.includes('text') || lowerStep.includes('field') || lowerStep.includes('input')) {
+            const fieldMatch = cleanStep.match(/(?:tap|click)(?:\s+on)?(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))\s*(?:text|field|input)/i);
+            const fieldText = fieldMatch?.[1] || fieldMatch?.[2] || fieldMatch?.[3] || 'text field';
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Tapping on text field: ${fieldText}")
+            text_field = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${fieldText}")
+            text_field.click()
+            sleep(1)`;
+          } else {
+            // Generic tap with element text
+            const elementMatch = cleanStep.match(/(?:tap|click)(?:\s+on)?(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))/i);
+            const elementText = elementMatch?.[1] || elementMatch?.[2] || elementMatch?.[3] || 'element';
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Tapping on element: ${elementText}")
+            element = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementText}")
+            element.click()
+            sleep(2)`;
+          }
+        }
+        
+        else if (lowerStep.includes('type') || lowerStep.includes('enter') || lowerStep.includes('input')) {
+          const textMatch = cleanStep.match(/(?:type|enter|input)(?:\s+the)?(?:\s+text)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))/i);
+          const textToType = textMatch?.[1] || textMatch?.[2] || textMatch?.[3] || 'text';
+          const fieldMatch = cleanStep.match(/(?:into|in)(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))\s*(?:field|input|text)/i);
+          const fieldName = fieldMatch?.[1] || fieldMatch?.[2] || fieldMatch?.[3] || 'text field';
+          
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Entering text '${textToType}' into field: ${fieldName}")
+            text_field = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${fieldName}")
+            text_field.clear()
+            text_field.send_keys("${textToType}")
+            sleep(1)`;
+        }
+        
+        else if (lowerStep.includes('swipe') || lowerStep.includes('scroll')) {
+          const direction = lowerStep.includes('up') ? 'up' : 
+                           lowerStep.includes('down') ? 'down' :
+                           lowerStep.includes('left') ? 'left' :
+                           lowerStep.includes('right') ? 'right' : 'up';
+          
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Swiping ${direction}")
+            size = driver.get_window_size()
+            start_x = size['width'] // 2
+            start_y = size['height'] // 2
+            ${direction === 'up' ? 'end_x, end_y = start_x, start_y - 200' :
+              direction === 'down' ? 'end_x, end_y = start_x, start_y + 200' :
+              direction === 'left' ? 'end_x, end_y = start_x - 200, start_y' :
+              'end_x, end_y = start_x + 200, start_y'}
+            driver.swipe(start_x, start_y, end_x, end_y, 500)
+            sleep(2)`;
+        }
+        
+        else if (lowerStep.includes('wait') || lowerStep.includes('pause')) {
+          const timeMatch = cleanStep.match(/(\d+)\s*(?:second|sec|s)/i);
+          const waitTime = timeMatch?.[1] || '3';
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Waiting ${waitTime} seconds")
+            sleep(${waitTime})`;
+        }
+        
+        else if (lowerStep.includes('screenshot') || lowerStep.includes('capture')) {
+          const nameMatch = cleanStep.match(/(?:"([^"]+)"|'([^']+)'|(\w+(?:_\w+)*))/i);
+          const screenshotName = nameMatch?.[1] || nameMatch?.[2] || nameMatch?.[3] || `step_${stepNumber}`;
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Taking screenshot: ${screenshotName}")
+            driver.save_screenshot(self.screenshot_dir + "/${screenshotName}.png")`;
+        }
+        
+        else if (lowerStep.includes('verify') || lowerStep.includes('check') || lowerStep.includes('assert')) {
+          const elementMatch = cleanStep.match(/(?:verify|check|assert)(?:\s+that)?(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))/i);
+          const elementText = elementMatch?.[1] || elementMatch?.[2] || elementMatch?.[3] || 'element';
+          
+          if (lowerStep.includes('visible') || lowerStep.includes('display')) {
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Verifying element is visible: ${elementText}")
+            element = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementText}")
+            assert element.is_displayed(), "Element '${elementText}' should be visible"`;
+          } else if (lowerStep.includes('text') || lowerStep.includes('contain')) {
+            const expectedTextMatch = cleanStep.match(/(?:text|contain)(?:s)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*))/i);
+            const expectedText = expectedTextMatch?.[1] || expectedTextMatch?.[2] || expectedTextMatch?.[3] || 'expected text';
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Verifying element text: ${elementText}")
+            element = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementText}")
+            actual_text = element.text
+            assert "${expectedText}" in actual_text, f"Expected '${expectedText}' in '{actual_text}'"`;
+          } else {
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Verifying element exists: ${elementText}")
+            element = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementText}")
+            assert element.is_displayed(), "Element '${elementText}' should exist"`;
+          }
+        }
+        
+        else if (lowerStep.includes('open') || lowerStep.includes('launch') || lowerStep.includes('start')) {
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("App launching/opening step")
+            sleep(3)  # Allow app to fully load`;
+        }
+        
+        else {
+          // Generic step - add as comment with basic action
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Executing: ${cleanStep}")
+            sleep(1)  # Generic pause for manual step`;
+        }
+        
+        appiumCode.push(appiumCommand);
+        stepNumber++;
+      }
+      
+      if (appiumCode.length === 0) {
+        console.log('[BitBar StepConverter] No steps found, using default');
+        return `# Default iOS test steps - launch app and take screenshot
+            log("🚀 App launched successfully")
+            log("📸 Taking screenshot: app_launch.png")
+            driver.save_screenshot(self.screenshot_dir + "/app_launch.png")
+            log("✅ Test completed successfully")`;
+      }
+      
+      const result = appiumCode.join('\n            \n');
+      console.log(`[BitBar StepConverter] Converted ${appiumCode.length} steps successfully`);
+      return result;
+      
+    } catch (error) {
+      console.error('[BitBar StepConverter] Error converting steps:', error);
+      // Return default steps on error
+      return `# Error converting steps - using default
+            log("🚀 App launched successfully")
+            log("📸 Taking screenshot: app_launch.png")
+            driver.save_screenshot(self.screenshot_dir + "/app_launch.png")
+            log("✅ Test completed successfully")`;
+    }
+  }
+
   // Helper method to generate resource content based on resource type
   private async generateResourceContent(resourceType: string, uri: URL): Promise<string> {
     try {
@@ -476,11 +646,20 @@ mv test-reports/*.xml TEST-all.xml`;
         }
         
         case 'ios_test_app_script': {
-          const testSteps = uri.searchParams.get('test_steps') || `# Default iOS test steps - launch app and take screenshot
+          const rawTestSteps = uri.searchParams.get('test_steps');
+          let testSteps: string;
+          
+          if (rawTestSteps) {
+            // Convert human-written steps to Appium code
+            testSteps = this.convertHumanStepsToAppium(rawTestSteps);
+          } else {
+            // Default test steps
+            testSteps = `# Default iOS test steps - launch app and take screenshot
             log("🚀 App launched successfully")
             log("📸 Taking screenshot: app_launch.png")
             driver.save_screenshot(self.screenshot_dir + "/app_launch.png")
             log("✅ Test completed successfully")`;
+          }
 
           return `#
 #  iOS Appium Test Script for BitBar
@@ -1396,10 +1575,10 @@ class BitBarAppiumTest(unittest.TestCase):
     // BitBar Test Package Creation Tool
     server.tool(
       "bitbar_create_ios_test_pkg",
-      "Create a complete iOS test package for BitBar containing all necessary files. This tool validates that it's running in an iOS application project directory and automatically extracts the bundle ID from the project configuration.",
+      "Create a complete iOS test package for BitBar containing all necessary files. This tool validates that it's running in an iOS application project directory and automatically extracts the bundle ID from the project configuration. Accepts human-written test steps that are automatically converted to Appium code.",
       {
         bundleId: z.string().optional().describe("iOS app bundle ID override (optional, will auto-detect from project if not provided)"),
-        testSteps: z.string().optional().describe("Custom test steps for the iOS test (optional, will use defaults if not provided)"),
+        testSteps: z.string().optional().describe("Human-written test steps as a numbered list (e.g., '1. Tap on Login button\\n2. Enter username \"testuser\"\\n3. Take screenshot'). Will be automatically converted to Appium code."),
         projectName: z.string().optional().describe("Project name for the package filename (optional, will detect from current directory)"),
       },
       async (args, _extra) => {
