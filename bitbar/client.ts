@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from "../common/info.js";
 import { Client } from "../common/types.js";
 
@@ -848,8 +848,318 @@ export class BitBarClient implements Client {
     );
   }
 
-  registerResources(_server: McpServer): void {
-    // BitBar does not currently support dynamic resources in this implementation
-    // Could be extended to provide resources for projects, device groups, etc.
+  registerResources(server: McpServer): void {
+    server.resource(
+      "ios_test_requirements",
+      new ResourceTemplate("bitbar://templates/requirements.txt", { list: undefined }),
+      async (uri) => {
+        try {
+          const requirementsContent = `Appium-Python-Client==2.11.1
+selenium==4.10.0
+xmlrunner==1.7.7`;
+
+          return {
+            contents: [{
+              uri: uri.href,
+              mimeType: "text/plain",
+              text: requirementsContent
+            }]
+          }
+        } catch (e) {
+          throw new Error(`Failed to generate requirements.txt: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        }
+      }
+    );
+
+    server.resource(
+      "ios_test_run_tests_sh",
+      new ResourceTemplate("bitbar://templates/run-tests.sh", { list: undefined }),
+      async (uri) => {
+        try {
+          const runTestsContent = `#!/bin/bash
+
+# Name of the test file
+TEST=\${TEST:="BitBarAppTest.py"}
+
+echo "Extracting tests.zip..."
+unzip -o tests.zip
+
+
+#########################################################
+#
+# Installing required Python libraries
+#  - required libraries are in requirement.txt file that
+#    is uploaded with this script file
+#
+#########################################################
+
+echo "Installing requirements from requirements.txt"
+chmod 0444 requirements.txt
+pip3 install -r requirements.txt
+
+#########################################################
+#
+# Preparing to start Appium
+# - UDID is the device ID on which test will run and
+#   required parameter on iOS test runs
+# - appium - is a wrapper tha calls the latest installed
+#   Appium server. Additional parameters can be passed
+#   to the server here.
+#
+#########################################################
+
+echo "UDID set to \${IOS_UDID}"
+echo "Starting Appium ..."
+appium --log-no-colors --log-timestamp
+
+
+#########################################################
+#
+# Setting of environment variables used later in test
+# - used for Appium desired capabilities
+# - note, APPIUM_URL is same for local and cloud server
+#   runs
+#########################################################
+export APPIUM_APPFILE="\$PWD/application.ipa"
+export APPIUM_URL="http://localhost:4723/wd/hub"
+export APPIUM_DEVICE="Local Device"
+export APPIUM_PLATFORM="IOS"
+export APPIUM_AUTOMATION="XCUITest"
+
+## Clean local screenshots directory
+rm -rf screenshots
+
+## Start test execution
+echo "Running test \${TEST}"
+python3 \${TEST}
+
+#########################################################
+#
+# Get test report
+# - do any test result post processing your test results
+#   need here
+# - also any additional files can be retrieved here
+# - retrieve files from device
+#
+#########################################################
+mv test-reports/*.xml TEST-all.xml`;
+
+          return {
+            contents: [{
+              uri: uri.href,
+              mimeType: "text/plain",
+              text: runTestsContent
+            }]
+          }
+        } catch (e) {
+          throw new Error(`Failed to generate run-tests.sh: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        }
+      }
+    );
+
+    server.resource(
+      "ios_test_app_script",
+      new ResourceTemplate("bitbar://templates/BitBarAppTest.py", { list: undefined }),
+      async (uri) => {
+        try {
+          // Extract test_steps from URI parameters
+          const url = new URL(uri.href);
+          const testSteps = url.searchParams.get('test_steps') || `# Default iOS test steps - launch app and take screenshot
+            log("� App launched successfully")
+            log("📸 Taking screenshot: app_launch.png")
+            driver.save_screenshot(self.screenshot_dir + "/app_launch.png")
+            log("✅ Test completed successfully")`;
+
+          const pythonTestContent = `#
+#  iOS Appium Test Script for BitBar
+#
+
+import unittest
+from time import sleep
+
+import xmlrunner
+from appium.webdriver.common.appiumby import AppiumBy
+from selenium.common.exceptions import WebDriverException
+
+from BitBarAppiumTest import BitBarAppiumTest, log
+
+
+class BitBarAppTest(BitBarAppiumTest):
+    def setUp(self):
+        # BitBarAppiumTest takes settings (local or cloud) from environment variables
+        super(BitBarAppTest, self).setUp()
+
+    # iOS Appium test
+    def test_the_app(self):
+        driver = self.get_driver()  # Initialize Appium connection to device
+
+        sleep(10)  # Wait that the app loads
+        log("Start iOS test!")
+        
+        # Use this to get detected screen hierarchy
+        # print self.driver.page_source
+
+        try:
+${testSteps.split('\n').map(line => '            ' + line).join('\n')}
+            
+        except WebDriverException:
+            log("iOS test run failed..")
+    # Test end.
+
+
+if __name__ == '__main__':
+    unittest.main(testRunner=xmlrunner.XMLTestRunner(output='test-reports'))`;
+
+          return {
+            contents: [{
+              uri: uri.href,
+              mimeType: "text/x-python",
+              text: pythonTestContent
+            }]
+          }
+        } catch (e) {
+          throw new Error(`Failed to generate BitBarAppTest.py: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        }
+      }
+    );
+
+    server.resource(
+      "ios_test_appium_script",
+      new ResourceTemplate("bitbar://templates/BitBarAppiumTest.py", { list: undefined }),
+      async (uri) => {
+        try {
+          // Extract bundle_id from URI parameters
+          const url = new URL(uri.href);
+          const bundleId = url.searchParams.get('bundle_id');
+          
+          if (!bundleId) {
+            throw new Error('bundle_id parameter is required for ios_test_appium_script resource');
+          }
+
+          const appiumTestContent = `# -*- coding: UTF-8 -*-
+
+#
+# Copyright(C) 2023 SmartBear Software
+#
+# iOS-specific Appium test base class for BitBar testing
+#
+
+import os
+import pprint
+import sys
+import time
+import unittest
+
+from appium import webdriver
+
+
+def log(msg):
+    header = ''
+    if os.environ.get('APPIUM_DEVICE'):
+        header = f"[{os.environ.get('APPIUM_DEVICE')}]"
+    print(f'{header} {time.strftime("%H:%M:%S")}: {msg}')
+    sys.stdout.flush()
+
+
+class BitBarAppiumTest(unittest.TestCase):
+    # Appium for iOS testing
+    driver = None
+    platform_name = 'iOS'  # Fixed to iOS
+    automation_name = 'XCUITest'  # Default iOS automation
+    appium_url = None
+    application_file = None
+    device_name = None
+    browser_name = None
+
+    screenshot_dir = None
+    # iOS specific - configurable bundle ID
+    bundle_id = '${bundleId}'
+
+    # Automatically resolved
+    resolution = None
+
+    def setUp(self, appium_url='http://localhost:4723/wd/hub', bundle_id='${bundleId}',
+              application_file=None, browser_name=None, screenshot_dir=None,
+              automation_name='XCUITest', noReset=None, fullReset=None):
+        self.appium_url = os.environ.get('APPIUM_URL') or appium_url
+        self.platform_name = 'iOS'  # Fixed to iOS
+
+        self.bundle_id = bundle_id or os.environ.get('APPIUM_BUNDLEID') or '${bundleId}'
+
+        self.automation_name = automation_name or os.environ.get('APPIUM_AUTOMATION') or 'XCUITest'
+
+        self.application_file = application_file or os.environ.get('APPIUM_APPFILE')
+        self.browser_name = browser_name or os.environ.get('APPIUM_BROWSER')
+
+        self.device_name = os.environ.get('APPIUM_DEVICE') or self.device_name
+
+        if screenshot_dir:
+            self.set_screenshot_dir(screenshot_dir)
+        else:
+            self.set_screenshot_dir(f'{os.getcwd()}/screenshots')
+        self.fullReset = fullReset or False
+        self.noReset = noReset or True
+        # Initialize WebDriver
+        self.get_driver()
+
+    def tearDown(self):
+        self.driver.quit()
+
+    def set_application_file(self, file):
+        self.application_file = file
+
+    def set_screenshot_dir(self, screenshot_dir):
+        log(f'Will save screenshots at: {screenshot_dir}')
+        self.screenshot_dir = screenshot_dir
+        if not os.path.exists(screenshot_dir):
+            log(f'Creating directory {screenshot_dir}')
+            os.mkdir(self.screenshot_dir)
+
+    def get_desired_capabilities(self):
+        capabilities = {
+            'platformName': 'iOS',
+            'appium:automationName': self.automation_name,
+            'appium:deviceName': self.device_name
+        }
+        if self.bundle_id:
+            log(f'Using bundleId {self.bundle_id}')
+            capabilities['appium:bundleId'] = self.bundle_id
+        if self.application_file:
+            log(f'Using application file {self.application_file}')
+            capabilities['appium:app'] = self.application_file
+        if self.browser_name:
+            log(f'Using mobile browser {self.browser_name}')
+            capabilities['browserName'] = self.browser_name
+
+        log(pprint.pformat(capabilities))
+        return capabilities
+
+    def get_driver(self):
+        if self.driver:
+            return self.driver
+            # set up WebDriver
+        log(f'Connecting WebDriver to {self.appium_url}')
+        self.driver = webdriver.Remote(self.appium_url, self.get_desired_capabilities())
+        # Wait max 30 seconds for elements
+        self.driver.implicitly_wait(30)
+
+        log('WebDriver response received')
+        return self.driver
+
+    def isIOS(self):
+        return True  # Always iOS for this test class`;
+
+          return {
+            contents: [{
+              uri: uri.href,
+              mimeType: "text/x-python",
+              text: appiumTestContent
+            }]
+          }
+        } catch (e) {
+          throw new Error(`Failed to generate BitBarAppiumTest.py: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        }
+      }
+    );
   }
 }
