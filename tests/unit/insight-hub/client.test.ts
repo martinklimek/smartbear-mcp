@@ -1,25 +1,30 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { InsightHubClient } from '../../../insight-hub/client.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from '../../../common/info.js';
+import { InsightHubClient } from '../../../insight-hub/client.js';
+import { BaseAPI } from '../../../insight-hub/client/api/base.js';
+import { ProjectAPI } from '../../../insight-hub/client/api/Project.js';
+import { CurrentUserAPI, ErrorAPI } from '../../../insight-hub/client/index.js';
 
 // Mock the dependencies
 const mockCurrentUserAPI = {
   listUserOrganizations: vi.fn(),
   getOrganizationProjects: vi.fn()
-};
+} satisfies Omit<CurrentUserAPI, keyof BaseAPI>;
 
 const mockErrorAPI = {
   viewErrorOnProject: vi.fn(),
   viewLatestEventOnError: vi.fn(),
   viewEventById: vi.fn(),
   listProjectErrors: vi.fn(),
-  updateErrorOnProject: vi.fn()
-};
+  updateErrorOnProject: vi.fn(),
+  listErrorPivots: vi.fn(),
+  listEventsOnProject: vi.fn()
+} satisfies Omit<ErrorAPI, keyof BaseAPI>;
 
 const mockProjectAPI = {
   listProjectEventFields: vi.fn(),
   createProject: vi.fn()
-};
+} satisfies Omit<ProjectAPI, keyof BaseAPI>;
 
 const mockCache = {
   set: vi.fn(),
@@ -586,7 +591,6 @@ describe('InsightHubClient', () => {
 
       const registeredTools = mockServer.registerTool.mock.calls.map((call: any) => call[0]);
       expect(registeredTools).toContain('get_insight_hub_error');
-      expect(registeredTools).toContain('get_insight_hub_error_latest_event');
       expect(registeredTools).toContain('get_insight_hub_event_details');
       expect(registeredTools).toContain('list_insight_hub_project_errors');
       expect(registeredTools).toContain('get_project_event_filters');
@@ -724,12 +728,14 @@ describe('InsightHubClient', () => {
         const mockProject = { id: 'proj-1', name: 'Project 1', slug: 'my-project' };
         const mockError = { id: 'error-1', message: 'Test error' };
         const mockOrg = { id: 'org-1', name: 'Test Org', slug: 'test-org' };
-        const mockEvent = { id: 'event-1', timestamp: '2023-01-01' };
+        const mockEvents = [{ id: 'event-1', timestamp: '2023-01-01' }];
+        const mockPivots = [{ id: 'pivot-1', name: 'test-pivot' }];
 
         mockCache.get.mockReturnValueOnce(mockProject)
           .mockReturnValueOnce(mockOrg);
         mockErrorAPI.viewErrorOnProject.mockResolvedValue({ body: mockError });
-        mockErrorAPI.viewLatestEventOnError.mockResolvedValue({ body: mockEvent });
+        mockErrorAPI.listEventsOnProject.mockResolvedValue({ body: mockEvents });
+        mockErrorAPI.listErrorPivots.mockResolvedValue({ body: mockPivots });
 
         client.registerTools(mockServer);
         const toolHandler = mockServer.registerTool.mock.calls
@@ -737,11 +743,14 @@ describe('InsightHubClient', () => {
 
         const result = await toolHandler({ errorId: 'error-1' });
 
+        const queryString = '?filters[error][][type]=eq&filters[error][][value]=error-1'
+        const encodedQueryString = encodeURI(queryString);
         expect(mockErrorAPI.viewErrorOnProject).toHaveBeenCalledWith('proj-1', 'error-1');
         expect(result.content[0].text).toBe(JSON.stringify({
           error_details: mockError,
-          latest_event: mockEvent,
-          url: `https://app.bugsnag.com/${mockOrg.slug}/${mockProject.slug}/errors/error-1`
+          latest_event: mockEvents[0],
+          pivots: mockPivots,
+          url: `https://app.bugsnag.com/${mockOrg.slug}/${mockProject.slug}/errors/error-1${encodedQueryString}`
         }));
       });
 
@@ -751,30 +760,6 @@ describe('InsightHubClient', () => {
           .find((call: any) => call[0] === 'get_insight_hub_error')[2];
 
         await expect(toolHandler({})).rejects.toThrow('Both projectId and errorId arguments are required');
-      });
-    });
-
-    describe('get_insight_hub_error_latest_event tool handler', () => {
-      it('should get latest error event', async () => {
-        const mockEvent = { id: 'event-1', timestamp: '2023-01-01' };
-        mockErrorAPI.viewLatestEventOnError.mockResolvedValue({ body: mockEvent });
-
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_insight_hub_error_latest_event')[2];
-
-        const result = await toolHandler({ errorId: 'error-1' });
-
-        expect(mockErrorAPI.viewLatestEventOnError).toHaveBeenCalledWith('error-1');
-        expect(result.content[0].text).toBe(JSON.stringify(mockEvent));
-      });
-
-      it('should throw error when errorId missing', async () => {
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_insight_hub_error_latest_event')[2];
-
-        await expect(toolHandler({})).rejects.toThrow('errorId argument is required');
       });
     });
 
