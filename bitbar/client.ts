@@ -395,6 +395,731 @@ export class BitBarClient implements Client {
     return response.json();
   }
 
+  // Helper method to convert human-written test steps to Appium code
+  private convertHumanStepsToAppium(humanSteps: string): string {
+    console.log('[BitBar StepConverter] Converting human-written steps to Appium code');
+    
+    try {
+      // Split steps by numbered lines (1., 2., etc.) or newlines
+      const steps = humanSteps
+        .split(/\n|(?=\d+\.)/g)
+        .map(step => step.trim())
+        .filter(step => step.length > 0);
+      
+      const appiumCode: string[] = [];
+      let stepNumber = 1;
+      
+      for (const step of steps) {
+        // Remove step numbering if present (1., 2., etc.)
+        const cleanStep = step.replace(/^\d+\.\s*/, '').trim();
+        if (!cleanStep) continue;
+        
+        console.log(`[BitBar StepConverter] Processing step ${stepNumber}: ${cleanStep}`);
+        
+        // Convert common human actions to Appium code
+        const lowerStep = cleanStep.toLowerCase();
+        let appiumCommand = '';
+        
+        if (lowerStep.includes('tap') || lowerStep.includes('click')) {
+          // Extract element identifier
+          if (lowerStep.includes('button')) {
+            const buttonMatch = cleanStep.match(/(?:tap|click)(?:\s+on)?(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|\b(\w+(?:\s+\w+)*?))\s*(?:button|btn)/i);
+            const buttonText = buttonMatch?.[1] || buttonMatch?.[2] || buttonMatch?.[3] || 'button';
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Tapping on button: ${buttonText}")
+            button = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${buttonText}")
+            button.click()
+            sleep(2)`;
+          } else if (lowerStep.includes('text') || lowerStep.includes('field') || lowerStep.includes('input')) {
+            const fieldMatch = cleanStep.match(/(?:tap|click)(?:\s+on)?(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))\s*(?:text|field|input)/i);
+            const fieldText = fieldMatch?.[1] || fieldMatch?.[2] || fieldMatch?.[3] || 'text field';
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Tapping on text field: ${fieldText}")
+            text_field = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${fieldText}")
+            text_field.click()
+            sleep(1)`;
+          } else {
+            // Generic tap with element text
+            const elementMatch = cleanStep.match(/(?:tap|click)(?:\s+on)?(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))/i);
+            const elementText = elementMatch?.[1] || elementMatch?.[2] || elementMatch?.[3] || 'element';
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Tapping on element: ${elementText}")
+            element = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementText}")
+            element.click()
+            sleep(2)`;
+          }
+        }
+        
+        else if (lowerStep.includes('type') || lowerStep.includes('enter') || lowerStep.includes('input')) {
+          const textMatch = cleanStep.match(/(?:type|enter|input)(?:\s+the)?(?:\s+text)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))/i);
+          const textToType = textMatch?.[1] || textMatch?.[2] || textMatch?.[3] || 'text';
+          const fieldMatch = cleanStep.match(/(?:into|in)(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))\s*(?:field|input|text)/i);
+          const fieldName = fieldMatch?.[1] || fieldMatch?.[2] || fieldMatch?.[3] || 'text field';
+          
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Entering text '${textToType}' into field: ${fieldName}")
+            text_field = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${fieldName}")
+            text_field.clear()
+            text_field.send_keys("${textToType}")
+            sleep(1)`;
+        }
+        
+        else if (lowerStep.includes('swipe') || lowerStep.includes('scroll')) {
+          const direction = lowerStep.includes('up') ? 'up' : 
+                           lowerStep.includes('down') ? 'down' :
+                           lowerStep.includes('left') ? 'left' :
+                           lowerStep.includes('right') ? 'right' : 'up';
+          
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Swiping ${direction}")
+            size = driver.get_window_size()
+            start_x = size['width'] // 2
+            start_y = size['height'] // 2
+            ${direction === 'up' ? 'end_x, end_y = start_x, start_y - 200' :
+              direction === 'down' ? 'end_x, end_y = start_x, start_y + 200' :
+              direction === 'left' ? 'end_x, end_y = start_x - 200, start_y' :
+              'end_x, end_y = start_x + 200, start_y'}
+            driver.swipe(start_x, start_y, end_x, end_y, 500)
+            sleep(2)`;
+        }
+        
+        else if (lowerStep.includes('wait') || lowerStep.includes('pause')) {
+          const timeMatch = cleanStep.match(/(\d+)\s*(?:second|sec|s)/i);
+          const waitTime = timeMatch?.[1] || '3';
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Waiting ${waitTime} seconds")
+            sleep(${waitTime})`;
+        }
+        
+        else if (lowerStep.includes('screenshot') || lowerStep.includes('capture')) {
+          const nameMatch = cleanStep.match(/(?:"([^"]+)"|'([^']+)'|(\w+(?:_\w+)*))/i);
+          const screenshotName = nameMatch?.[1] || nameMatch?.[2] || nameMatch?.[3] || `step_${stepNumber}`;
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Taking screenshot: ${screenshotName}")
+            driver.save_screenshot(self.screenshot_dir + "/${screenshotName}.png")`;
+        }
+        
+        else if (lowerStep.includes('verify') || lowerStep.includes('check') || lowerStep.includes('assert')) {
+          const elementMatch = cleanStep.match(/(?:verify|check|assert)(?:\s+that)?(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))/i);
+          const elementText = elementMatch?.[1] || elementMatch?.[2] || elementMatch?.[3] || 'element';
+          
+          if (lowerStep.includes('visible') || lowerStep.includes('display')) {
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Verifying element is visible: ${elementText}")
+            element = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementText}")
+            assert element.is_displayed(), "Element '${elementText}' should be visible"`;
+          } else if (lowerStep.includes('text') || lowerStep.includes('contain')) {
+            const expectedTextMatch = cleanStep.match(/(?:text|contain)(?:s)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*))/i);
+            const expectedText = expectedTextMatch?.[1] || expectedTextMatch?.[2] || expectedTextMatch?.[3] || 'expected text';
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Verifying element text: ${elementText}")
+            element = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementText}")
+            actual_text = element.text
+            assert "${expectedText}" in actual_text, f"Expected '${expectedText}' in '{actual_text}'"`;
+          } else {
+            appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Verifying element exists: ${elementText}")
+            element = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementText}")
+            assert element.is_displayed(), "Element '${elementText}' should exist"`;
+          }
+        }
+        
+        else if (lowerStep.includes('open') || lowerStep.includes('launch') || lowerStep.includes('start')) {
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("App launching/opening step")
+            sleep(3)  # Allow app to fully load`;
+        }
+        
+        else {
+          // Generic step - add as comment with basic action
+          appiumCommand = `# Step ${stepNumber}: ${cleanStep}
+            log("Executing: ${cleanStep}")
+            sleep(1)  # Generic pause for manual step`;
+        }
+        
+        appiumCode.push(appiumCommand);
+        stepNumber++;
+      }
+      
+      if (appiumCode.length === 0) {
+        console.log('[BitBar StepConverter] No steps found, using default');
+        return `# Default iOS test steps - launch app and take screenshot
+            log("🚀 App launched successfully")
+            log("📸 Taking screenshot: app_launch.png")
+            driver.save_screenshot(self.screenshot_dir + "/app_launch.png")
+            log("✅ Test completed successfully")`;
+      }
+      
+      const result = appiumCode.join('\n            \n');
+      console.log(`[BitBar StepConverter] Converted ${appiumCode.length} steps successfully`);
+      return result;
+      
+    } catch (error) {
+      console.error('[BitBar StepConverter] Error converting steps:', error);
+      // Return default steps on error
+      return `# Error converting steps - using default
+            log("🚀 App launched successfully")
+            log("📸 Taking screenshot: app_launch.png")
+            driver.save_screenshot(self.screenshot_dir + "/app_launch.png")
+            log("✅ Test completed successfully")`;
+    }
+  }
+
+  // Helper method to generate resource content based on resource type
+  private async generateResourceContent(resourceType: string, uri: URL): Promise<string> {
+    try {
+      switch (resourceType) {
+        case 'ios_test_requirements': {
+          return `Appium-Python-Client==2.11.1
+selenium==4.10.0
+xmlrunner==1.7.7`;
+        }
+        
+        case 'ios_test_run_tests_sh': {
+          return `#!/bin/bash
+
+# Name of the test file
+TEST=\${TEST:="BitBarAppTest.py"}
+
+echo "Extracting tests.zip..."
+unzip -o tests.zip
+
+
+#########################################################
+#
+# Installing required Python libraries
+#  - required libraries are in requirement.txt file that
+#    is uploaded with this script file
+#
+#########################################################
+
+echo "Installing requirements from requirements.txt"
+chmod 0444 requirements.txt
+pip3 install -r requirements.txt
+
+#########################################################
+#
+# Preparing to start Appium
+# - UDID is the device ID on which test will run and
+#   required parameter on iOS test runs
+# - appium - is a wrapper tha calls the latest installed
+#   Appium server. Additional parameters can be passed
+#   to the server here.
+#
+#########################################################
+
+echo "UDID set to \${IOS_UDID}"
+echo "Starting Appium ..."
+appium --log-no-colors --log-timestamp
+
+
+#########################################################
+#
+# Setting of environment variables used later in test
+# - used for Appium desired capabilities
+# - note, APPIUM_URL is same for local and cloud server
+#   runs
+#########################################################
+export APPIUM_APPFILE="\$PWD/application.ipa"
+export APPIUM_URL="http://localhost:4723/wd/hub"
+export APPIUM_DEVICE="Local Device"
+export APPIUM_PLATFORM="IOS"
+export APPIUM_AUTOMATION="XCUITest"
+
+## Clean local screenshots directory
+rm -rf screenshots
+
+## Start test execution
+echo "Running test \${TEST}"
+python3 \${TEST}
+
+#########################################################
+#
+# Get test report
+# - do any test result post processing your test results
+#   need here
+# - also any additional files can be retrieved here
+# - retrieve files from device
+#
+#########################################################
+mv test-reports/*.xml TEST-all.xml`;
+        }
+        
+        case 'ios_test_app_script': {
+          const rawTestSteps = uri.searchParams.get('test_steps');
+          let testSteps: string;
+          
+          if (rawTestSteps) {
+            // Convert human-written steps to Appium code
+            testSteps = this.convertHumanStepsToAppium(rawTestSteps);
+          } else {
+            // Default test steps
+            testSteps = `# Default iOS test steps - launch app and take screenshot
+            log("🚀 App launched successfully")
+            log("📸 Taking screenshot: app_launch.png")
+            driver.save_screenshot(self.screenshot_dir + "/app_launch.png")
+            log("✅ Test completed successfully")`;
+          }
+
+          return `#
+#  iOS Appium Test Script for BitBar
+#
+
+import unittest
+from time import sleep
+
+import xmlrunner
+from appium.webdriver.common.appiumby import AppiumBy
+from selenium.common.exceptions import WebDriverException
+
+from BitBarAppiumTest import BitBarAppiumTest, log
+
+
+class BitBarAppTest(BitBarAppiumTest):
+    def setUp(self):
+        # BitBarAppiumTest takes settings (local or cloud) from environment variables
+        super(BitBarAppTest, self).setUp()
+
+    # iOS Appium test
+    def test_the_app(self):
+        driver = self.get_driver()  # Initialize Appium connection to device
+
+        sleep(10)  # Wait that the app loads
+        log("Start iOS test!")
+        
+        # Use this to get detected screen hierarchy
+        # print self.driver.page_source
+
+        try:
+${testSteps.split('\n').map(line => '            ' + line).join('\n')}
+            
+        except WebDriverException:
+            log("iOS test run failed..")
+    # Test end.
+
+
+if __name__ == '__main__':
+    unittest.main(testRunner=xmlrunner.XMLTestRunner(output='test-reports'))`;
+        }
+        
+        case 'ios_test_appium_script': {
+          const bundleId = uri.searchParams.get('bundle_id');
+          if (!bundleId) {
+            throw new Error('bundle_id parameter is required for ios_test_appium_script resource');
+          }
+
+          return `# -*- coding: UTF-8 -*-
+
+#
+# Copyright(C) 2023 SmartBear Software
+#
+# iOS-specific Appium test base class for BitBar testing
+#
+
+import os
+import pprint
+import sys
+import time
+import unittest
+
+from appium import webdriver
+
+
+def log(msg):
+    header = ''
+    if os.environ.get('APPIUM_DEVICE'):
+        header = f"[{os.environ.get('APPIUM_DEVICE')}]"
+    print(f'{header} {time.strftime("%H:%M:%S")}: {msg}')
+    sys.stdout.flush()
+
+
+class BitBarAppiumTest(unittest.TestCase):
+    # Appium for iOS testing
+    driver = None
+    platform_name = 'iOS'  # Fixed to iOS
+    automation_name = 'XCUITest'  # Default iOS automation
+    appium_url = None
+    application_file = None
+    device_name = None
+    browser_name = None
+
+    screenshot_dir = None
+    # iOS specific - configurable bundle ID
+    bundle_id = '${bundleId}'
+
+    # Automatically resolved
+    resolution = None
+
+    def setUp(self, appium_url='http://localhost:4723/wd/hub', bundle_id='${bundleId}',
+              application_file=None, browser_name=None, screenshot_dir=None,
+              automation_name='XCUITest', noReset=None, fullReset=None):
+        self.appium_url = os.environ.get('APPIUM_URL') or appium_url
+        self.platform_name = 'iOS'  # Fixed to iOS
+
+        self.bundle_id = bundle_id or os.environ.get('APPIUM_BUNDLEID') or '${bundleId}'
+
+        self.automation_name = automation_name or os.environ.get('APPIUM_AUTOMATION') or 'XCUITest'
+
+        self.application_file = application_file or os.environ.get('APPIUM_APPFILE')
+        self.browser_name = browser_name or os.environ.get('APPIUM_BROWSER')
+
+        self.device_name = os.environ.get('APPIUM_DEVICE') or self.device_name
+
+        if screenshot_dir:
+            self.set_screenshot_dir(screenshot_dir)
+        else:
+            self.set_screenshot_dir(f'{os.getcwd()}/screenshots')
+        self.fullReset = fullReset or False
+        self.noReset = noReset or True
+        # Initialize WebDriver
+        self.get_driver()
+
+    def tearDown(self):
+        self.driver.quit()
+
+    def set_application_file(self, file):
+        self.application_file = file
+
+    def set_screenshot_dir(self, screenshot_dir):
+        log(f'Will save screenshots at: {screenshot_dir}')
+        self.screenshot_dir = screenshot_dir
+        if not os.path.exists(screenshot_dir):
+            log(f'Creating directory {screenshot_dir}')
+            os.mkdir(self.screenshot_dir)
+
+    def get_desired_capabilities(self):
+        capabilities = {
+            'platformName': 'iOS',
+            'appium:automationName': self.automation_name,
+            'appium:deviceName': self.device_name
+        }
+        if self.bundle_id:
+            log(f'Using bundleId {self.bundle_id}')
+            capabilities['appium:bundleId'] = self.bundle_id
+        if self.application_file:
+            log(f'Using application file {self.application_file}')
+            capabilities['appium:app'] = self.application_file
+        if self.browser_name:
+            log(f'Using mobile browser {self.browser_name}')
+            capabilities['browserName'] = self.browser_name
+
+        log(pprint.pformat(capabilities))
+        return capabilities
+
+    def get_driver(self):
+        if self.driver:
+            return self.driver
+            # set up WebDriver
+        log(f'Connecting WebDriver to {self.appium_url}')
+        self.driver = webdriver.Remote(self.appium_url, self.get_desired_capabilities())
+        # Wait max 30 seconds for elements
+        self.driver.implicitly_wait(30)
+
+        log('WebDriver response received')
+        return self.driver
+
+    def isIOS(self):
+        return True  # Always iOS for this test class`;
+        }
+        
+        default:
+          throw new Error(`Unknown resource type: ${resourceType}`);
+      }
+    } catch (error) {
+      throw new Error(`Failed to generate ${resourceType} content: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Helper method to validate if current directory is an iOS application project
+  private async validateIOSProject(projectDir: string, fs: any): Promise<boolean> {
+    try {
+      console.log('[BitBar Validation] Checking iOS project indicators in:', projectDir);
+      
+      // Define iOS project indicators
+      const iosProjectIndicators = [
+        // Xcode project files
+        '*.xcodeproj',
+        '*.xcworkspace',
+        
+        // iOS specific files
+        'Info.plist',
+        'AppDelegate.swift',
+        'AppDelegate.m',
+        'AppDelegate.h',
+        'SceneDelegate.swift',
+        'SceneDelegate.m',
+        'SceneDelegate.h',
+        
+        // iOS specific directories
+        '*.app',
+        '*.ipa',
+        
+        // Configuration files that often contain iOS-specific content
+        'project.pbxproj'
+      ];
+      
+      // Check for direct file matches
+      for (const indicator of iosProjectIndicators) {
+        if (indicator.includes('*')) {
+          // Handle wildcard patterns
+          const extension = indicator.replace('*', '');
+          const items = fs.readdirSync(projectDir);
+          
+          for (const item of items) {
+            if (item.endsWith(extension)) {
+              console.log(`[BitBar Validation] Found iOS indicator: ${item}`);
+              return true;
+            }
+          }
+        } else {
+          // Handle exact file names
+          const filePath = `${projectDir}/${indicator}`;
+          if (fs.existsSync(filePath)) {
+            console.log(`[BitBar Validation] Found iOS indicator: ${indicator}`);
+            return true;
+          }
+        }
+      }
+      
+      // Check subdirectories for iOS indicators (one level deep)
+      const items = fs.readdirSync(projectDir);
+      for (const item of items) {
+        const itemPath = `${projectDir}/${item}`;
+        const stat = fs.statSync(itemPath);
+        
+        if (stat.isDirectory()) {
+          // Check for common iOS directory structures
+          const commonIOSDirs = [
+            'ios', 'iOS', 
+            'app', 'App',
+            'src', 'source',
+            'Sources'
+          ];
+          
+          if (commonIOSDirs.includes(item)) {
+            // Recursively check these directories for iOS indicators
+            try {
+              const subItems = fs.readdirSync(itemPath);
+              for (const subItem of subItems) {
+                if (subItem.endsWith('.xcodeproj') || 
+                    subItem.endsWith('.xcworkspace') || 
+                    subItem === 'Info.plist' ||
+                    subItem.includes('AppDelegate')) {
+                  console.log(`[BitBar Validation] Found iOS indicator in ${item}/${subItem}`);
+                  return true;
+                }
+              }
+            } catch (error) {
+              // Continue if we can't read subdirectory
+              continue;
+            }
+          }
+        }
+      }
+      
+      // Additional check: Look for package.json with iOS-related dependencies
+      const packageJsonPath = `${projectDir}/package.json`;
+      if (fs.existsSync(packageJsonPath)) {
+        try {
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+          const dependencies = {
+            ...packageJson.dependencies,
+            ...packageJson.devDependencies
+          };
+          
+          const iosRelatedPackages = [
+            'react-native',
+            '@react-native',
+            'expo',
+            'cordova-ios',
+            'ionic',
+            'capacitor'
+          ];
+          
+          for (const pkg of iosRelatedPackages) {
+            for (const dep in dependencies) {
+              if (dep.includes(pkg)) {
+                console.log(`[BitBar Validation] Found iOS-related dependency: ${dep}`);
+                return true;
+              }
+            }
+          }
+        } catch (error) {
+          // Continue if we can't parse package.json
+        }
+      }
+      
+      console.log('[BitBar Validation] No iOS project indicators found');
+      return false;
+      
+    } catch (error) {
+      console.error('[BitBar Validation] Error during iOS project validation:', error);
+      // In case of validation errors, we'll be conservative and return false
+      return false;
+    }
+  }
+
+  // Helper method to extract bundle ID from iOS project
+  private async extractBundleIdFromProject(projectDir: string, fs: any): Promise<string | null> {
+    try {
+      console.log('[BitBar BundleID] Extracting bundle ID from iOS project in:', projectDir);
+      
+      // Strategy 1: Look for Info.plist files and extract CFBundleIdentifier
+      const findInfoPlistFiles = (dir: string, maxDepth: number = 3): string[] => {
+        if (maxDepth <= 0) return [];
+        
+        const infoPlistPaths: string[] = [];
+        try {
+          const items = fs.readdirSync(dir);
+          
+          for (const item of items) {
+            const itemPath = `${dir}/${item}`;
+            const stat = fs.statSync(itemPath);
+            
+            if (stat.isFile() && item === 'Info.plist') {
+              infoPlistPaths.push(itemPath);
+            } else if (stat.isDirectory() && !item.startsWith('.') && !item.includes('node_modules')) {
+              // Recursively search subdirectories
+              infoPlistPaths.push(...findInfoPlistFiles(itemPath, maxDepth - 1));
+            }
+          }
+        } catch (error) {
+          // Continue if we can't read directory
+        }
+        
+        return infoPlistPaths;
+      };
+      
+      const infoPlistFiles = findInfoPlistFiles(projectDir);
+      console.log(`[BitBar BundleID] Found ${infoPlistFiles.length} Info.plist files`);
+      
+      for (const plistPath of infoPlistFiles) {
+        try {
+          const plistContent = fs.readFileSync(plistPath, 'utf8');
+          console.log(`[BitBar BundleID] Checking ${plistPath}`);
+          
+          // Look for CFBundleIdentifier in the plist (XML format)
+          const bundleIdMatch = plistContent.match(/<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/);
+          if (bundleIdMatch && bundleIdMatch[1]) {
+            const bundleId = bundleIdMatch[1].trim();
+            // Skip template/placeholder bundle IDs
+            if (!bundleId.includes('$(') && bundleId.includes('.') && bundleId.length > 5) {
+              console.log(`[BitBar BundleID] Found bundle ID in ${plistPath}: ${bundleId}`);
+              return bundleId;
+            }
+          }
+        } catch (error) {
+          console.log(`[BitBar BundleID] Error reading ${plistPath}:`, error);
+          continue;
+        }
+      }
+      
+      // Strategy 2: Look for project.pbxproj files and extract bundle identifier
+      const findPbxprojFiles = (dir: string, maxDepth: number = 3): string[] => {
+        if (maxDepth <= 0) return [];
+        
+        const pbxprojPaths: string[] = [];
+        try {
+          const items = fs.readdirSync(dir);
+          
+          for (const item of items) {
+            const itemPath = `${dir}/${item}`;
+            const stat = fs.statSync(itemPath);
+            
+            if (stat.isFile() && item === 'project.pbxproj') {
+              pbxprojPaths.push(itemPath);
+            } else if (stat.isDirectory() && item.endsWith('.xcodeproj')) {
+              // Look inside .xcodeproj bundles
+              pbxprojPaths.push(...findPbxprojFiles(itemPath, maxDepth - 1));
+            } else if (stat.isDirectory() && !item.startsWith('.') && !item.includes('node_modules')) {
+              // Recursively search other subdirectories
+              pbxprojPaths.push(...findPbxprojFiles(itemPath, maxDepth - 1));
+            }
+          }
+        } catch (error) {
+          // Continue if we can't read directory
+        }
+        
+        return pbxprojPaths;
+      };
+      
+      const pbxprojFiles = findPbxprojFiles(projectDir);
+      console.log(`[BitBar BundleID] Found ${pbxprojFiles.length} project.pbxproj files`);
+      
+      for (const pbxprojPath of pbxprojFiles) {
+        try {
+          const pbxprojContent = fs.readFileSync(pbxprojPath, 'utf8');
+          console.log(`[BitBar BundleID] Checking ${pbxprojPath}`);
+          
+          // Look for PRODUCT_BUNDLE_IDENTIFIER in the pbxproj file
+          const bundleIdMatches = pbxprojContent.match(/PRODUCT_BUNDLE_IDENTIFIER\s*=\s*([^;]+);/g);
+          if (bundleIdMatches && bundleIdMatches.length > 0) {
+            for (const match of bundleIdMatches) {
+              const bundleIdMatch = match.match(/PRODUCT_BUNDLE_IDENTIFIER\s*=\s*([^;]+);/);
+              if (bundleIdMatch && bundleIdMatch[1]) {
+                const bundleId = bundleIdMatch[1].trim().replace(/"/g, '');
+                // Skip template/placeholder bundle IDs
+                if (!bundleId.includes('$(') && bundleId.includes('.') && bundleId.length > 5) {
+                  console.log(`[BitBar BundleID] Found bundle ID in ${pbxprojPath}: ${bundleId}`);
+                  return bundleId;
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.log(`[BitBar BundleID] Error reading ${pbxprojPath}:`, error);
+          continue;
+        }
+      }
+      
+      // Strategy 3: Look for package.json with React Native or similar configurations
+      const packageJsonPath = `${projectDir}/package.json`;
+      if (fs.existsSync(packageJsonPath)) {
+        try {
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+          
+          // Check for React Native configuration
+          if (packageJson.react && packageJson.react.ios && packageJson.react.ios.bundleIdentifier) {
+            const bundleId = packageJson.react.ios.bundleIdentifier;
+            console.log(`[BitBar BundleID] Found bundle ID in package.json (React Native): ${bundleId}`);
+            return bundleId;
+          }
+          
+          // Check for Expo configuration
+          if (packageJson.expo && packageJson.expo.ios && packageJson.expo.ios.bundleIdentifier) {
+            const bundleId = packageJson.expo.ios.bundleIdentifier;
+            console.log(`[BitBar BundleID] Found bundle ID in package.json (Expo): ${bundleId}`);
+            return bundleId;
+          }
+        } catch (error) {
+          console.log('[BitBar BundleID] Error parsing package.json:', error);
+        }
+      }
+      
+      // Strategy 4: Look for app.json (Expo projects)
+      const appJsonPath = `${projectDir}/app.json`;
+      if (fs.existsSync(appJsonPath)) {
+        try {
+          const appJson = JSON.parse(fs.readFileSync(appJsonPath, 'utf8'));
+          if (appJson.expo && appJson.expo.ios && appJson.expo.ios.bundleIdentifier) {
+            const bundleId = appJson.expo.ios.bundleIdentifier;
+            console.log(`[BitBar BundleID] Found bundle ID in app.json: ${bundleId}`);
+            return bundleId;
+          }
+        } catch (error) {
+          console.log('[BitBar BundleID] Error parsing app.json:', error);
+        }
+      }
+      
+      console.log('[BitBar BundleID] No bundle ID found in project');
+      return null;
+      
+    } catch (error) {
+      console.error('[BitBar BundleID] Error during bundle ID extraction:', error);
+      return null;
+    }
+  }
+
   registerTools(server: McpServer): void {
     // User/Account Tools
     server.tool(
@@ -844,6 +1569,207 @@ export class BitBarClient implements Client {
         return {
           content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
         };
+      }
+    );
+
+    // BitBar Test Package Creation Tool
+    server.tool(
+      "bitbar_create_ios_test_pkg",
+      "Create a complete iOS test package for BitBar containing all necessary files. This tool validates that it's running in an iOS application project directory and automatically extracts the bundle ID from the project configuration. Accepts human-written test steps that are automatically converted to Appium code.",
+      {
+        bundleId: z.string().optional().describe("iOS app bundle ID override (optional, will auto-detect from project if not provided)"),
+        testSteps: z.string().optional().describe("Human-written test steps as a numbered list (e.g., '1. Tap on Login button\\n2. Enter username \"testuser\"\\n3. Take screenshot'). Will be automatically converted to Appium code."),
+        projectName: z.string().optional().describe("Project name for the package filename (optional, will detect from current directory)"),
+      },
+      async (args, _extra) => {
+        let bundleId: string | undefined;
+        
+        try {
+          console.log('[BitBar Package] Creating iOS test package...');
+          
+          // Import required modules
+          const fs = await import('fs');
+          const path = await import('path');
+          const archiver = await import('archiver');
+          
+          // Validate that this is an iOS application project
+          console.log('[BitBar Package] Validating iOS project structure...');
+          const currentDir = process.cwd();
+          const isIOSProject = await this.validateIOSProject(currentDir, fs);
+          
+          if (!isIOSProject) {
+            throw new Error(
+              'This tool can only be used in iOS application projects. ' +
+              'Please ensure you are in a directory containing iOS project files ' +
+              '(such as *.xcodeproj, *.xcworkspace, Info.plist, or other iOS-specific files).'
+            );
+          }
+          
+          console.log('[BitBar Package] iOS project structure validated successfully');
+          
+          // Auto-detect bundle ID from project or use provided override
+          bundleId = args.bundleId;
+          if (!bundleId) {
+            console.log('[BitBar Package] Auto-detecting bundle ID from project...');
+            const detectedBundleId = await this.extractBundleIdFromProject(currentDir, fs);
+            
+            if (!detectedBundleId) {
+              throw new Error(
+                'Could not automatically detect bundle ID from iOS project. ' +
+                'Please ensure your project contains Info.plist with CFBundleIdentifier, ' +
+                'project.pbxproj with PRODUCT_BUNDLE_IDENTIFIER, or provide bundleId parameter manually.'
+              );
+            }
+            
+            bundleId = detectedBundleId;
+            console.log(`[BitBar Package] Auto-detected bundle ID: ${bundleId}`);
+          } else {
+            console.log(`[BitBar Package] Using provided bundle ID: ${bundleId}`);
+          }
+          
+          // Determine project name with safe fallback
+          let projectName = args.projectName;
+          if (!projectName) {
+            // Try to get a clean project name from current directory
+            const baseName = path.basename(process.cwd());
+            // Sanitize the project name to ensure it's safe for filenames
+            projectName = baseName
+              .replace(/[^a-zA-Z0-9_-]/g, '_') // Replace invalid chars with underscore
+              .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+              .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+              .toLowerCase(); // Convert to lowercase for consistency
+            
+            // If sanitization resulted in empty string, use default
+            if (!projectName || projectName.length === 0) {
+              projectName = 'ios_project';
+            }
+          }
+          console.log('[BitBar Package] Project name:', projectName);
+          
+          // Create timestamp with consistent format
+          const now = new Date();
+          const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
+          const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, ''); // HHMMSS
+          const timestamp = `${dateStr}_${timeStr}`;
+          
+          // Create BitBarPackages directory if it doesn't exist
+          const packagesDir = path.join(process.cwd(), 'BitBarPackages');
+          if (!fs.existsSync(packagesDir)) {
+            console.log('[BitBar Package] Creating BitBarPackages directory');
+            fs.mkdirSync(packagesDir, { recursive: true });
+          }
+          
+          // Generate zip filename with predictable format
+          const zipFilename = `BitBar_iOS_test_${projectName}_${timestamp}.zip`;
+          const zipPath = path.join(packagesDir, zipFilename);
+          console.log('[BitBar Package] Creating zip file:', zipPath);
+          
+          // Get resource contents using the helper method
+          console.log('[BitBar Package] Generating file contents using resources...');
+          
+          // Get requirements.txt content
+          const requirementsUri = new URL('bitbar://templates/requirements.txt');
+          const requirementsResource = await this.generateResourceContent('ios_test_requirements', requirementsUri);
+          
+          // Get run-tests.sh content
+          const runTestsUri = new URL('bitbar://templates/run-tests.sh');
+          const runTestsResource = await this.generateResourceContent('ios_test_run_tests_sh', runTestsUri);
+          
+          // Get BitBarAppTest.py content with optional test steps
+          const appTestUri = new URL('bitbar://templates/BitBarAppTest.py');
+          if (args.testSteps) {
+            appTestUri.searchParams.set('test_steps', args.testSteps);
+          }
+          const appTestResource = await this.generateResourceContent('ios_test_app_script', appTestUri);
+          
+          // Get BitBarAppiumTest.py content with bundle ID
+          const appiumTestUri = new URL('bitbar://templates/BitBarAppiumTest.py');
+          appiumTestUri.searchParams.set('bundle_id', bundleId);
+          const appiumTestResource = await this.generateResourceContent('ios_test_appium_script', appiumTestUri);
+          
+          console.log('[BitBar Package] All resource contents generated successfully');
+          
+          // Create zip file
+          return new Promise((resolve, reject) => {
+            const output = fs.createWriteStream(zipPath);
+            const archive = archiver.default('zip', {
+              zlib: { level: 9 } // Maximum compression
+            });
+            
+            output.on('close', () => {
+              const fileSize = archive.pointer();
+              console.log('[BitBar Package] Zip file created successfully');
+              console.log('[BitBar Package] Total bytes:', fileSize);
+              
+              resolve({
+                content: [{ 
+                  type: "text", 
+                  text: JSON.stringify({
+                    success: true,
+                    packagePath: zipPath,
+                    packageName: zipFilename,
+                    bundleId: bundleId,
+                    projectName: projectName,
+                    timestamp: timestamp,
+                    fileSize: fileSize,
+                    files: [
+                      'run-tests.sh',
+                      'requirements.txt', 
+                      'BitBarAppTest.py',
+                      'BitBarAppiumTest.py'
+                    ],
+                    message: `iOS test package created successfully at ${zipPath}`,
+                    bundleIdSource: args.bundleId ? 'user-provided' : 'auto-detected'
+                  }, null, 2)
+                }],
+              });
+            });
+            
+            output.on('error', (err: Error) => {
+              console.error('[BitBar Package] Output stream error:', err);
+              reject(new Error(`Failed to create zip file: ${err.message}`));
+            });
+            
+            archive.on('error', (err: Error) => {
+              console.error('[BitBar Package] Archive error:', err);
+              reject(new Error(`Failed to create archive: ${err.message}`));
+            });
+            
+            archive.pipe(output);
+            
+            // Add files to the archive
+            try {
+              console.log('[BitBar Package] Adding files to archive...');
+              
+              archive.append(runTestsResource, { name: 'run-tests.sh' });
+              archive.append(requirementsResource, { name: 'requirements.txt' });
+              archive.append(appTestResource, { name: 'BitBarAppTest.py' });
+              archive.append(appiumTestResource, { name: 'BitBarAppiumTest.py' });
+              
+              console.log('[BitBar Package] All files added, finalizing archive...');
+              archive.finalize();
+              
+            } catch (archiveError) {
+              console.error('[BitBar Package] Error adding files to archive:', archiveError);
+              reject(new Error(`Failed to add files to archive: ${archiveError instanceof Error ? archiveError.message : 'Unknown error'}`));
+            }
+          });
+          
+        } catch (error) {
+          console.error('[BitBar Package] Package creation error:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown package creation error';
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({ 
+                error: true, 
+                message: errorMessage,
+                bundleId: bundleId || 'not-detected',
+                timestamp: new Date().toISOString()
+              }, null, 2) 
+            }],
+          };
+        }
       }
     );
   }
