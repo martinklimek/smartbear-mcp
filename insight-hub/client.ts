@@ -864,19 +864,80 @@ ${(latestEvent as any)?.exceptions?.[0]?.stacktrace?.map((frame: any, index: num
 ).slice(0, 10).join('\n') || 'No stack trace available'}
 
 ## User Actions Leading to Error (Breadcrumbs)
-${(latestEvent as any)?.breadcrumbs?.map((breadcrumb: any, index: number) => 
-  `${index + 1}. [${breadcrumb.timestamp || 'unknown time'}] ${breadcrumb.type || 'action'}: ${breadcrumb.name || breadcrumb.message || 'unknown action'}`
-).slice(-10).join('\n') || 'No breadcrumb data available'}
+${(latestEvent as any)?.breadcrumbs?.filter((breadcrumb: any) => {
+  // Only include navigation-related breadcrumbs
+  const type = breadcrumb?.type?.toLowerCase() || '';
+  const name = breadcrumb?.name?.toLowerCase() || '';
+  const message = breadcrumb?.message?.toLowerCase() || '';
+  
+  return type.includes('navigation') || type.includes('ui') || type.includes('user') ||
+         name.includes('tap') || name.includes('click') || name.includes('touch') ||
+         name.includes('button') || name.includes('switch') || name.includes('select') ||
+         message.includes('tap') || message.includes('click') || message.includes('touch');
+}).map((breadcrumb: any, index: number) => {
+  const timestamp = breadcrumb?.timestamp || 'unknown';
+  const action = breadcrumb?.name || breadcrumb?.message || 'user_action';
+  const metadataEntries = Object.entries(breadcrumb || {})
+    .filter(([key, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => key + ': ' + (typeof value === 'string' ? value : JSON.stringify(value)));
+  
+  return 'Navigation Step ' + (index + 1) + ':\\n' + metadataEntries.join('\\n');
+}).slice(-10).join('\\n\\n') || 'No navigation breadcrumbs available'}
 
 ## Instructions for Reproduction
 
-Based on this error data, provide:
+Based on this error data, provide a JSON response with the following structure:
 
-1. **Device Requirements** - Specific device model, OS version, and browser requirements needed to reproduce this error
-2. **Exact Reproduction Steps** - Step-by-step instructions to recreate this issue
-3. **Appium Test Code** - Complete Appium code snippet that reproduces the error
+1. **Device Requirements JSON** - Return device specifications in this exact format:
+{
+  "device_model": "extracted from device information above",
+  "operating_system": "extracted from device information above"
+}
 
-Provide only the device requirements, reproduction steps and Appium code. Do not include additional analysis or alternatives.
+2. **Reproduction Steps JSON Array** - For each navigation breadcrumb above, create a JSON entry in this exact format:
+[
+  {
+    "timestamp": "extracted from breadcrumb timestamp",
+    "action": "extracted or inferred action name",
+    "appium_selector": "accessibility_id:extracted_element_id or xpath://element/path"
+  }
+]
+
+**Important Instructions**: 
+- Extract device_model and operating_system from the Device Information section above
+- Only process navigation-related breadcrumbs (ignore network requests, logs, etc.)
+- For appium_selector, try to extract element IDs from breadcrumb metadata or use descriptive selectors
+- Convert action names to specific action types based on element interaction:
+  - "tap_button" for button taps/clicks
+  - "switch_tab" for tab navigation/switches
+  - "tap_cell" for table/list cell selections
+  - "enter_text" for text input fields
+  - "swipe_screen" for swipe gestures
+  - "select_option" for picker/dropdown selections
+  - "toggle_switch" for on/off toggle controls
+  - "tap_element" for generic element taps
+- Return ONLY valid JSON - no explanatory text, markdown, or code blocks
+- Use the exact field names: device_model, operating_system, timestamp, action, appium_selector
+
+Expected JSON Output Format:
+{
+  "device_requirements": {
+    "device_model": "iPhone 16 Pro",
+    "operating_system": "iOS 16.6.1"
+  },
+  "reproduction_steps": [
+    {
+      "timestamp": "1754891404.265854",
+      "action": "tap_button",
+      "appium_selector": "accessibility_id:TestCrashButton"
+    },
+    {
+      "timestamp": "1754891405.123456",
+      "action": "switch_tab",
+      "appium_selector": "accessibility_id:SettingsTab"
+    }
+  ]
+}
 
 Note: Full error and event details are available via the Insight Hub dashboard at ${args.bugsnagUrl}`
                 }
