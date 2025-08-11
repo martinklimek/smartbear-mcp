@@ -2227,6 +2227,306 @@ class BitBarAppiumTest(unittest.TestCase):
         }
       }
     );
+
+    // BitBar IPA Build Tool
+    server.tool(
+      "bitbar_build_ipa",
+      "Build an iOS IPA file for BitBar testing using Xcode build and export commands. This tool validates that it's running in an iOS application project directory, automatically detects the project name, creates an archive, and exports it as an IPA file with consistent naming format: {iOS-Project-Name}_{YYYY}m{MM}d{DD}h{HH}m{mm}.ipa. Requires Xcode and valid iOS project configuration.",
+      {
+        scheme: z.string().optional().describe("Xcode scheme name to build (optional, will auto-detect if not provided)"),
+        configuration: z.string().optional().describe("Build configuration (Debug/Release, defaults to Release)"),
+        archivePath: z.string().optional().describe("Custom archive path (optional, defaults to ./build/{ProjectName}.xcarchive)"),
+        exportPath: z.string().optional().describe("Custom export directory path (optional, defaults to ./build/Export/)"),
+        exportOptionsPlist: z.string().optional().describe("Custom ExportOptions.plist path (optional, will create default if not provided)"),
+        projectName: z.string().optional().describe("Project name for the IPA filename (optional, will detect from current directory)"),
+      },
+      async (args, _extra) => {
+        try {
+          console.log('[BitBar IPA] Starting iOS IPA build process...');
+          
+          // Import required modules
+          const fs = await import('fs');
+          const path = await import('path');
+          const { spawn } = await import('child_process');
+          
+          // Validate that this is an iOS application project
+          console.log('[BitBar IPA] Validating iOS project structure...');
+          const currentDir = process.cwd();
+          const isIOSProject = await this.validateIOSProject(currentDir, fs);
+          
+          if (!isIOSProject) {
+            throw new Error(
+              'This tool can only be used in iOS application projects. ' +
+              'Please ensure you are in a directory containing iOS project files ' +
+              '(such as *.xcodeproj, *.xcworkspace, Info.plist, or other iOS-specific files).'
+            );
+          }
+          
+          console.log('[BitBar IPA] iOS project structure validated successfully');
+          
+          // Auto-detect iOS project name
+          let iOSProjectName = args.projectName;
+          if (!iOSProjectName) {
+            console.log('[BitBar IPA] Auto-detecting iOS project name...');
+            const extractedProjectName = await this.extractIOSProjectName(currentDir, fs);
+            
+            if (extractedProjectName) {
+              iOSProjectName = extractedProjectName;
+            } else {
+              // Fallback to current directory name with sanitization
+              const baseName = path.basename(process.cwd());
+              iOSProjectName = baseName
+                .replace(/[^a-zA-Z0-9_-]/g, '_')
+                .replace(/_{2,}/g, '_')
+                .replace(/^_+|_+$/g, '')
+                .toLowerCase();
+              
+              if (!iOSProjectName || iOSProjectName.length === 0) {
+                iOSProjectName = 'ios_project';
+              }
+            }
+          }
+          console.log('[BitBar IPA] iOS project name:', iOSProjectName);
+          
+          // Create timestamp with specific format: {YYYY}m{MM}d{DD}h{HH}m{mm}
+          const now = new Date();
+          const year = now.getFullYear().toString();
+          const month = (now.getMonth() + 1).toString().padStart(2, '0');
+          const day = now.getDate().toString().padStart(2, '0');
+          const hour = now.getHours().toString().padStart(2, '0');
+          const minute = now.getMinutes().toString().padStart(2, '0');
+          const formattedTimestamp = `${year}m${month}d${day}h${hour}m${minute}`;
+          
+          console.log('[BitBar IPA] Generated timestamp:', formattedTimestamp);
+          
+          // Set up build paths
+          const buildDir = path.join(currentDir, 'build');
+          const archivePath = args.archivePath || path.join(buildDir, `${iOSProjectName}.xcarchive`);
+          const exportPath = args.exportPath || path.join(buildDir, 'Export');
+          const exportOptionsPlist = args.exportOptionsPlist || path.join(currentDir, 'ExportOptions.plist');
+          
+          // Create build directory if it doesn't exist
+          if (!fs.existsSync(buildDir)) {
+            console.log('[BitBar IPA] Creating build directory:', buildDir);
+            fs.mkdirSync(buildDir, { recursive: true });
+          }
+          
+          // Create default ExportOptions.plist if it doesn't exist
+          if (!fs.existsSync(exportOptionsPlist)) {
+            console.log('[BitBar IPA] Creating default ExportOptions.plist');
+            const defaultExportOptions = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>development</string>
+    <key>teamID</key>
+    <string>DEVELOPMENT_TEAM</string>
+    <key>uploadBitcode</key>
+    <false/>
+    <key>uploadSymbols</key>
+    <true/>
+    <key>compileBitcode</key>
+    <false/>
+</dict>
+</plist>`;
+            fs.writeFileSync(exportOptionsPlist, defaultExportOptions);
+          }
+          
+          // Find Xcode project or workspace
+          const items = fs.readdirSync(currentDir);
+          let projectFile = null;
+          let isWorkspace = false;
+          
+          for (const item of items) {
+            if (item.endsWith('.xcworkspace')) {
+              projectFile = item;
+              isWorkspace = true;
+              break;
+            } else if (item.endsWith('.xcodeproj')) {
+              projectFile = item;
+              isWorkspace = false;
+            }
+          }
+          
+          if (!projectFile) {
+            throw new Error('No Xcode project (.xcodeproj) or workspace (.xcworkspace) found in current directory');
+          }
+          
+          console.log(`[BitBar IPA] Using ${isWorkspace ? 'workspace' : 'project'}: ${projectFile}`);
+          
+          // Auto-detect scheme if not provided
+          let scheme = args.scheme;
+          if (!scheme) {
+            // Use project name as scheme (common convention)
+            scheme = projectFile.replace('.xcodeproj', '').replace('.xcworkspace', '');
+            console.log(`[BitBar IPA] Auto-detected scheme: ${scheme}`);
+          }
+          
+          const configuration = args.configuration || 'Release';
+          console.log(`[BitBar IPA] Using configuration: ${configuration}`);
+          
+          // Build archive command
+          const archiveArgs = [
+            '-scheme', scheme,
+            '-configuration', configuration,
+            '-destination', 'generic/platform=iOS',
+            '-archivePath', archivePath,
+            'archive',
+            'CODE_SIGN_STYLE=Automatic'
+          ];
+          
+          if (isWorkspace) {
+            archiveArgs.unshift('-workspace', projectFile);
+          } else {
+            archiveArgs.unshift('-project', projectFile);
+          }
+          
+          console.log('[BitBar IPA] Creating archive...');
+          console.log(`[BitBar IPA] Command: xcodebuild ${archiveArgs.join(' ')}`);
+          
+          // Execute archive command
+          await new Promise<void>((resolve, reject) => {
+            const archiveProcess = spawn('xcodebuild', archiveArgs, {
+              cwd: currentDir,
+              stdio: ['ignore', 'pipe', 'pipe']
+            });
+            
+            let stdout = '';
+            let stderr = '';
+            
+            archiveProcess.stdout?.on('data', (data) => {
+              stdout += data.toString();
+            });
+            
+            archiveProcess.stderr?.on('data', (data) => {
+              stderr += data.toString();
+            });
+            
+            archiveProcess.on('close', (code) => {
+              if (code === 0) {
+                console.log('[BitBar IPA] Archive created successfully');
+                resolve();
+              } else {
+                console.error('[BitBar IPA] Archive failed with code:', code);
+                console.error('[BitBar IPA] Error output:', stderr);
+                reject(new Error(`Archive build failed with exit code ${code}: ${stderr}`));
+              }
+            });
+            
+            archiveProcess.on('error', (error) => {
+              reject(new Error(`Failed to start xcodebuild: ${error.message}`));
+            });
+          });
+          
+          // Export IPA command
+          const exportArgs = [
+            '-exportArchive',
+            '-archivePath', archivePath,
+            '-exportPath', exportPath,
+            '-exportOptionsPlist', exportOptionsPlist
+          ];
+          
+          console.log('[BitBar IPA] Exporting IPA...');
+          console.log(`[BitBar IPA] Command: xcodebuild ${exportArgs.join(' ')}`);
+          
+          // Execute export command
+          await new Promise<void>((resolve, reject) => {
+            const exportProcess = spawn('xcodebuild', exportArgs, {
+              cwd: currentDir,
+              stdio: ['ignore', 'pipe', 'pipe']
+            });
+            
+            let stdout = '';
+            let stderr = '';
+            
+            exportProcess.stdout?.on('data', (data) => {
+              stdout += data.toString();
+            });
+            
+            exportProcess.stderr?.on('data', (data) => {
+              stderr += data.toString();
+            });
+            
+            exportProcess.on('close', (code) => {
+              if (code === 0) {
+                console.log('[BitBar IPA] IPA exported successfully');
+                resolve();
+              } else {
+                console.error('[BitBar IPA] Export failed with code:', code);
+                console.error('[BitBar IPA] Error output:', stderr);
+                reject(new Error(`IPA export failed with exit code ${code}: ${stderr}`));
+              }
+            });
+            
+            exportProcess.on('error', (error) => {
+              reject(new Error(`Failed to start xcodebuild for export: ${error.message}`));
+            });
+          });
+          
+          // Find the exported IPA file and rename it with timestamp
+          const exportedFiles = fs.readdirSync(exportPath);
+          const ipaFile = exportedFiles.find(file => file.endsWith('.ipa'));
+          
+          if (!ipaFile) {
+            throw new Error('No IPA file found in export directory');
+          }
+          
+          const originalIpaPath = path.join(exportPath, ipaFile);
+          const timestampedIpaName = `${iOSProjectName}_${formattedTimestamp}.ipa`;
+          const finalIpaPath = path.join(exportPath, timestampedIpaName);
+          
+          // Rename the IPA file with timestamp
+          fs.renameSync(originalIpaPath, finalIpaPath);
+          console.log(`[BitBar IPA] Renamed IPA to: ${timestampedIpaName}`);
+          
+          // Get file size
+          const stats = fs.statSync(finalIpaPath);
+          const fileSize = stats.size;
+          
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({
+                success: true,
+                ipaPath: finalIpaPath,
+                ipaName: timestampedIpaName,
+                projectName: iOSProjectName,
+                timestamp: formattedTimestamp,
+                fileSize: fileSize,
+                scheme: scheme,
+                configuration: configuration,
+                archivePath: archivePath,
+                exportPath: exportPath,
+                message: `iOS IPA built successfully at ${finalIpaPath}`,
+                originalName: ipaFile
+              }, null, 2)
+            }],
+          };
+          
+        } catch (error) {
+          console.error('[BitBar IPA] Build error:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown build error';
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({ 
+                error: true, 
+                message: errorMessage,
+                timestamp: new Date().toISOString(),
+                suggestions: [
+                  'Ensure Xcode is installed and configured properly',
+                  'Verify that the iOS project builds successfully in Xcode',
+                  'Check that signing certificates are properly configured',
+                  'Ensure the scheme exists and is marked as shared',
+                  'Verify ExportOptions.plist contains valid configuration'
+                ]
+              }, null, 2) 
+            }],
+          };
+        }
+      }
+    );
   }
 
   registerResources(server: McpServer): void {
