@@ -1235,6 +1235,160 @@ class BitBarAppiumTest(unittest.TestCase):
     }
   }
 
+  // Helper method to extract iOS project name from project files
+  private async extractIOSProjectName(projectDir: string, fs: any): Promise<string | null> {
+    try {
+      console.log('[BitBar ProjectName] Extracting iOS project name from:', projectDir);
+      
+      // Strategy 1: Look for .xcodeproj directories and extract project name
+      const findXcodeprojDirs = (dir: string, maxDepth: number = 2): string[] => {
+        if (maxDepth <= 0) return [];
+        
+        const xcodeprojPaths: string[] = [];
+        try {
+          const items = fs.readdirSync(dir);
+          
+          for (const item of items) {
+            const itemPath = `${dir}/${item}`;
+            const stat = fs.statSync(itemPath);
+            
+            if (stat.isDirectory() && item.endsWith('.xcodeproj')) {
+              console.log(`[BitBar ProjectName] Found Xcode project: ${item}`);
+              const projectName = item.replace('.xcodeproj', '');
+              if (projectName && projectName.length > 0) {
+                xcodeprojPaths.push(projectName);
+              }
+            } else if (stat.isDirectory() && !item.startsWith('.') && !item.includes('node_modules')) {
+              // Recursively search subdirectories
+              xcodeprojPaths.push(...findXcodeprojDirs(itemPath, maxDepth - 1));
+            }
+          }
+        } catch (error) {
+          // Continue if we can't read directory
+        }
+        
+        return xcodeprojPaths;
+      };
+      
+      const xcodeprojNames = findXcodeprojDirs(projectDir);
+      if (xcodeprojNames.length > 0) {
+        const projectName = xcodeprojNames[0]; // Use the first found project
+        console.log(`[BitBar ProjectName] Using Xcode project name: ${projectName}`);
+        return projectName.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+      }
+      
+      // Strategy 2: Look for .xcworkspace directories
+      const findXcworkspaceDirs = (dir: string, maxDepth: number = 2): string[] => {
+        if (maxDepth <= 0) return [];
+        
+        const xcworkspacePaths: string[] = [];
+        try {
+          const items = fs.readdirSync(dir);
+          
+          for (const item of items) {
+            const itemPath = `${dir}/${item}`;
+            const stat = fs.statSync(itemPath);
+            
+            if (stat.isDirectory() && item.endsWith('.xcworkspace')) {
+              console.log(`[BitBar ProjectName] Found Xcode workspace: ${item}`);
+              const workspaceName = item.replace('.xcworkspace', '');
+              if (workspaceName && workspaceName.length > 0) {
+                xcworkspacePaths.push(workspaceName);
+              }
+            } else if (stat.isDirectory() && !item.startsWith('.') && !item.includes('node_modules')) {
+              // Recursively search subdirectories
+              xcworkspacePaths.push(...findXcworkspaceDirs(itemPath, maxDepth - 1));
+            }
+          }
+        } catch (error) {
+          // Continue if we can't read directory
+        }
+        
+        return xcworkspacePaths;
+      };
+      
+      const xcworkspaceNames = findXcworkspaceDirs(projectDir);
+      if (xcworkspaceNames.length > 0) {
+        const workspaceName = xcworkspaceNames[0]; // Use the first found workspace
+        console.log(`[BitBar ProjectName] Using Xcode workspace name: ${workspaceName}`);
+        return workspaceName.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+      }
+      
+      // Strategy 3: Look for Info.plist and extract CFBundleName or CFBundleDisplayName
+      const findInfoPlistFiles = (dir: string, maxDepth: number = 3): string[] => {
+        if (maxDepth <= 0) return [];
+        
+        const infoPlistPaths: string[] = [];
+        try {
+          const items = fs.readdirSync(dir);
+          
+          for (const item of items) {
+            const itemPath = `${dir}/${item}`;
+            const stat = fs.statSync(itemPath);
+            
+            if (stat.isFile() && item === 'Info.plist') {
+              infoPlistPaths.push(itemPath);
+            } else if (stat.isDirectory() && !item.startsWith('.') && !item.includes('node_modules')) {
+              infoPlistPaths.push(...findInfoPlistFiles(itemPath, maxDepth - 1));
+            }
+          }
+        } catch (error) {
+          // Continue if we can't read directory
+        }
+        
+        return infoPlistPaths;
+      };
+      
+      const infoPlistFiles = findInfoPlistFiles(projectDir);
+      for (const plistPath of infoPlistFiles) {
+        try {
+          const plistContent = fs.readFileSync(plistPath, 'utf8');
+          
+          // Look for CFBundleDisplayName first (user-facing name)
+          let bundleNameMatch = plistContent.match(/<key>CFBundleDisplayName<\/key>\s*<string>([^<]+)<\/string>/);
+          if (!bundleNameMatch) {
+            // Fallback to CFBundleName
+            bundleNameMatch = plistContent.match(/<key>CFBundleName<\/key>\s*<string>([^<]+)<\/string>/);
+          }
+          
+          if (bundleNameMatch && bundleNameMatch[1]) {
+            const bundleName = bundleNameMatch[1].trim();
+            // Skip template/placeholder names
+            if (!bundleName.includes('$(') && bundleName.length > 0 && bundleName !== 'MyApp') {
+              console.log(`[BitBar ProjectName] Found bundle name in Info.plist: ${bundleName}`);
+              return bundleName.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+            }
+          }
+        } catch (error) {
+          console.log(`[BitBar ProjectName] Error reading ${plistPath}:`, error);
+          continue;
+        }
+      }
+      
+      // Strategy 4: Look for package.json name field
+      const packageJsonPath = `${projectDir}/package.json`;
+      if (fs.existsSync(packageJsonPath)) {
+        try {
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+          if (packageJson.name && typeof packageJson.name === 'string') {
+            const packageName = packageJson.name.replace(/^@[^\/]+\//, ''); // Remove scope if present
+            console.log(`[BitBar ProjectName] Found project name in package.json: ${packageName}`);
+            return packageName.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+          }
+        } catch (error) {
+          console.log('[BitBar ProjectName] Error parsing package.json:', error);
+        }
+      }
+      
+      console.log('[BitBar ProjectName] No iOS project name found');
+      return null;
+      
+    } catch (error) {
+      console.error('[BitBar ProjectName] Error during project name extraction:', error);
+      return null;
+    }
+  }
+
   // Helper method to extract bundle ID from iOS project
   private async extractBundleIdFromProject(projectDir: string, fs: any): Promise<string | null> {
     try {
@@ -1851,7 +2005,7 @@ class BitBarAppiumTest(unittest.TestCase):
     // BitBar Test Package Creation Tool
     server.tool(
       "bitbar_create_ios_test_pkg",
-      "Create a complete iOS test package for BitBar containing all necessary files. This tool validates that it's running in an iOS application project directory and automatically extracts the bundle ID from the project configuration. Accepts JSON format from error-repro-details prompt with device requirements and reproduction steps that are automatically converted to Appium code.",
+      "Create a complete iOS test package for BitBar with consistent naming format: {iOS-Project-Name}_test_pkg_{2025m01d15h14m30}. This tool validates that it's running in an iOS application project directory and automatically extracts both the iOS project name and bundle ID from the project configuration. The zip filename uses auto-detected project name with timestamp format {YYYY}m{MM}d{DD}h{HH}m{mm}. Accepts JSON format from error-repro-details prompt with device requirements and reproduction steps that are automatically converted to Appium code.",
       {
         bundleId: z.string().optional().describe("iOS app bundle ID override (optional, will auto-detect from project if not provided)"),
         testSteps: z.string().optional().describe("Human-written test steps as a numbered list (legacy format) OR JSON string from error-repro-details prompt with device_requirements and reproduction_steps arrays"),
@@ -1914,30 +2068,41 @@ class BitBarAppiumTest(unittest.TestCase):
             console.log(`[BitBar Package] Using provided bundle ID: ${bundleId}`);
           }
           
-          // Determine project name with safe fallback
-          let projectName = args.projectName;
-          if (!projectName) {
-            // Try to get a clean project name from current directory
-            const baseName = path.basename(process.cwd());
-            // Sanitize the project name to ensure it's safe for filenames
-            projectName = baseName
-              .replace(/[^a-zA-Z0-9_-]/g, '_') // Replace invalid chars with underscore
-              .replace(/_{2,}/g, '_') // Replace multiple underscores with single
-              .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
-              .toLowerCase(); // Convert to lowercase for consistency
+          // Auto-detect iOS project name with enhanced detection
+          let iOSProjectName = args.projectName;
+          if (!iOSProjectName) {
+            console.log('[BitBar Package] Auto-detecting iOS project name...');
+            const extractedProjectName = await this.extractIOSProjectName(currentDir, fs);
             
-            // If sanitization resulted in empty string, use default
-            if (!projectName || projectName.length === 0) {
-              projectName = 'ios_project';
+            if (extractedProjectName) {
+              iOSProjectName = extractedProjectName;
+            } else {
+              // Fallback to current directory name with sanitization
+              const baseName = path.basename(process.cwd());
+              iOSProjectName = baseName
+                .replace(/[^a-zA-Z0-9_-]/g, '_') // Replace invalid chars with underscore
+                .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+                .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+                .toLowerCase(); // Convert to lowercase for consistency
+              
+              // If sanitization resulted in empty string, use default
+              if (!iOSProjectName || iOSProjectName.length === 0) {
+                iOSProjectName = 'ios_project';
+              }
             }
           }
-          console.log('[BitBar Package] Project name:', projectName);
+          console.log('[BitBar Package] iOS project name:', iOSProjectName);
           
-          // Create timestamp with consistent format
+          // Create timestamp with specific format: {YYYY}m{MM}d{DD}h{HH}m{mm}
           const now = new Date();
-          const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
-          const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, ''); // HHMMSS
-          const timestamp = `${dateStr}_${timeStr}`;
+          const year = now.getFullYear().toString(); // YYYY
+          const month = (now.getMonth() + 1).toString().padStart(2, '0'); // MM (01-12)
+          const day = now.getDate().toString().padStart(2, '0'); // DD (01-31)
+          const hour = now.getHours().toString().padStart(2, '0'); // HH (00-23)
+          const minute = now.getMinutes().toString().padStart(2, '0'); // mm (00-59)
+          const formattedTimestamp = `${year}m${month}d${day}h${hour}m${minute}`;
+          
+          console.log('[BitBar Package] Generated timestamp:', formattedTimestamp);
           
           // Create BitBarPackages directory if it doesn't exist
           const packagesDir = path.join(process.cwd(), 'BitBarPackages');
@@ -1946,8 +2111,8 @@ class BitBarAppiumTest(unittest.TestCase):
             fs.mkdirSync(packagesDir, { recursive: true });
           }
           
-          // Generate zip filename with predictable format
-          const zipFilename = `BitBar_iOS_test_${projectName}_${timestamp}.zip`;
+          // Generate zip filename with consistent naming structure: {iOS-Project-Name}_test_pkg_{y2025m01d15h14m30}
+          const zipFilename = `${iOSProjectName}_test_pkg_${formattedTimestamp}.zip`;
           const zipPath = path.join(packagesDir, zipFilename);
           console.log('[BitBar Package] Creating zip file:', zipPath);
           
@@ -1999,8 +2164,8 @@ class BitBarAppiumTest(unittest.TestCase):
                     packagePath: zipPath,
                     packageName: zipFilename,
                     bundleId: bundleId,
-                    projectName: projectName,
-                    timestamp: timestamp,
+                    projectName: iOSProjectName,
+                    timestamp: formattedTimestamp,
                     fileSize: fileSize,
                     files: [
                       'run-tests.sh',
