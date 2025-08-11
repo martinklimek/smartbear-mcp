@@ -1235,6 +1235,160 @@ class BitBarAppiumTest(unittest.TestCase):
     }
   }
 
+  // Helper method to extract iOS project name from project files
+  private async extractIOSProjectName(projectDir: string, fs: any): Promise<string | null> {
+    try {
+      console.log('[BitBar ProjectName] Extracting iOS project name from:', projectDir);
+      
+      // Strategy 1: Look for .xcodeproj directories and extract project name
+      const findXcodeprojDirs = (dir: string, maxDepth: number = 2): string[] => {
+        if (maxDepth <= 0) return [];
+        
+        const xcodeprojPaths: string[] = [];
+        try {
+          const items = fs.readdirSync(dir);
+          
+          for (const item of items) {
+            const itemPath = `${dir}/${item}`;
+            const stat = fs.statSync(itemPath);
+            
+            if (stat.isDirectory() && item.endsWith('.xcodeproj')) {
+              console.log(`[BitBar ProjectName] Found Xcode project: ${item}`);
+              const projectName = item.replace('.xcodeproj', '');
+              if (projectName && projectName.length > 0) {
+                xcodeprojPaths.push(projectName);
+              }
+            } else if (stat.isDirectory() && !item.startsWith('.') && !item.includes('node_modules')) {
+              // Recursively search subdirectories
+              xcodeprojPaths.push(...findXcodeprojDirs(itemPath, maxDepth - 1));
+            }
+          }
+        } catch (error) {
+          // Continue if we can't read directory
+        }
+        
+        return xcodeprojPaths;
+      };
+      
+      const xcodeprojNames = findXcodeprojDirs(projectDir);
+      if (xcodeprojNames.length > 0) {
+        const projectName = xcodeprojNames[0]; // Use the first found project
+        console.log(`[BitBar ProjectName] Using Xcode project name: ${projectName}`);
+        return projectName.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+      }
+      
+      // Strategy 2: Look for .xcworkspace directories
+      const findXcworkspaceDirs = (dir: string, maxDepth: number = 2): string[] => {
+        if (maxDepth <= 0) return [];
+        
+        const xcworkspacePaths: string[] = [];
+        try {
+          const items = fs.readdirSync(dir);
+          
+          for (const item of items) {
+            const itemPath = `${dir}/${item}`;
+            const stat = fs.statSync(itemPath);
+            
+            if (stat.isDirectory() && item.endsWith('.xcworkspace')) {
+              console.log(`[BitBar ProjectName] Found Xcode workspace: ${item}`);
+              const workspaceName = item.replace('.xcworkspace', '');
+              if (workspaceName && workspaceName.length > 0) {
+                xcworkspacePaths.push(workspaceName);
+              }
+            } else if (stat.isDirectory() && !item.startsWith('.') && !item.includes('node_modules')) {
+              // Recursively search subdirectories
+              xcworkspacePaths.push(...findXcworkspaceDirs(itemPath, maxDepth - 1));
+            }
+          }
+        } catch (error) {
+          // Continue if we can't read directory
+        }
+        
+        return xcworkspacePaths;
+      };
+      
+      const xcworkspaceNames = findXcworkspaceDirs(projectDir);
+      if (xcworkspaceNames.length > 0) {
+        const workspaceName = xcworkspaceNames[0]; // Use the first found workspace
+        console.log(`[BitBar ProjectName] Using Xcode workspace name: ${workspaceName}`);
+        return workspaceName.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+      }
+      
+      // Strategy 3: Look for Info.plist and extract CFBundleName or CFBundleDisplayName
+      const findInfoPlistFiles = (dir: string, maxDepth: number = 3): string[] => {
+        if (maxDepth <= 0) return [];
+        
+        const infoPlistPaths: string[] = [];
+        try {
+          const items = fs.readdirSync(dir);
+          
+          for (const item of items) {
+            const itemPath = `${dir}/${item}`;
+            const stat = fs.statSync(itemPath);
+            
+            if (stat.isFile() && item === 'Info.plist') {
+              infoPlistPaths.push(itemPath);
+            } else if (stat.isDirectory() && !item.startsWith('.') && !item.includes('node_modules')) {
+              infoPlistPaths.push(...findInfoPlistFiles(itemPath, maxDepth - 1));
+            }
+          }
+        } catch (error) {
+          // Continue if we can't read directory
+        }
+        
+        return infoPlistPaths;
+      };
+      
+      const infoPlistFiles = findInfoPlistFiles(projectDir);
+      for (const plistPath of infoPlistFiles) {
+        try {
+          const plistContent = fs.readFileSync(plistPath, 'utf8');
+          
+          // Look for CFBundleDisplayName first (user-facing name)
+          let bundleNameMatch = plistContent.match(/<key>CFBundleDisplayName<\/key>\s*<string>([^<]+)<\/string>/);
+          if (!bundleNameMatch) {
+            // Fallback to CFBundleName
+            bundleNameMatch = plistContent.match(/<key>CFBundleName<\/key>\s*<string>([^<]+)<\/string>/);
+          }
+          
+          if (bundleNameMatch && bundleNameMatch[1]) {
+            const bundleName = bundleNameMatch[1].trim();
+            // Skip template/placeholder names
+            if (!bundleName.includes('$(') && bundleName.length > 0 && bundleName !== 'MyApp') {
+              console.log(`[BitBar ProjectName] Found bundle name in Info.plist: ${bundleName}`);
+              return bundleName.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+            }
+          }
+        } catch (error) {
+          console.log(`[BitBar ProjectName] Error reading ${plistPath}:`, error);
+          continue;
+        }
+      }
+      
+      // Strategy 4: Look for package.json name field
+      const packageJsonPath = `${projectDir}/package.json`;
+      if (fs.existsSync(packageJsonPath)) {
+        try {
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+          if (packageJson.name && typeof packageJson.name === 'string') {
+            const packageName = packageJson.name.replace(/^@[^\/]+\//, ''); // Remove scope if present
+            console.log(`[BitBar ProjectName] Found project name in package.json: ${packageName}`);
+            return packageName.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+          }
+        } catch (error) {
+          console.log('[BitBar ProjectName] Error parsing package.json:', error);
+        }
+      }
+      
+      console.log('[BitBar ProjectName] No iOS project name found');
+      return null;
+      
+    } catch (error) {
+      console.error('[BitBar ProjectName] Error during project name extraction:', error);
+      return null;
+    }
+  }
+
   // Helper method to extract bundle ID from iOS project
   private async extractBundleIdFromProject(projectDir: string, fs: any): Promise<string | null> {
     try {
@@ -1851,7 +2005,7 @@ class BitBarAppiumTest(unittest.TestCase):
     // BitBar Test Package Creation Tool
     server.tool(
       "bitbar_create_ios_test_pkg",
-      "Create a complete iOS test package for BitBar containing all necessary files. This tool validates that it's running in an iOS application project directory and automatically extracts the bundle ID from the project configuration. Accepts JSON format from error-repro-details prompt with device requirements and reproduction steps that are automatically converted to Appium code.",
+      "Create a complete iOS test package for BitBar with consistent naming format: {iOS-Project-Name}_test_pkg_{2025m01d15h14m30}. This tool validates that it's running in an iOS application project directory and automatically extracts both the iOS project name and bundle ID from the project configuration. The zip filename uses auto-detected project name with timestamp format {YYYY}m{MM}d{DD}h{HH}m{mm}. Accepts JSON format from error-repro-details prompt with device requirements and reproduction steps that are automatically converted to Appium code.",
       {
         bundleId: z.string().optional().describe("iOS app bundle ID override (optional, will auto-detect from project if not provided)"),
         testSteps: z.string().optional().describe("Human-written test steps as a numbered list (legacy format) OR JSON string from error-repro-details prompt with device_requirements and reproduction_steps arrays"),
@@ -1914,30 +2068,41 @@ class BitBarAppiumTest(unittest.TestCase):
             console.log(`[BitBar Package] Using provided bundle ID: ${bundleId}`);
           }
           
-          // Determine project name with safe fallback
-          let projectName = args.projectName;
-          if (!projectName) {
-            // Try to get a clean project name from current directory
-            const baseName = path.basename(process.cwd());
-            // Sanitize the project name to ensure it's safe for filenames
-            projectName = baseName
-              .replace(/[^a-zA-Z0-9_-]/g, '_') // Replace invalid chars with underscore
-              .replace(/_{2,}/g, '_') // Replace multiple underscores with single
-              .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
-              .toLowerCase(); // Convert to lowercase for consistency
+          // Auto-detect iOS project name with enhanced detection
+          let iOSProjectName = args.projectName;
+          if (!iOSProjectName) {
+            console.log('[BitBar Package] Auto-detecting iOS project name...');
+            const extractedProjectName = await this.extractIOSProjectName(currentDir, fs);
             
-            // If sanitization resulted in empty string, use default
-            if (!projectName || projectName.length === 0) {
-              projectName = 'ios_project';
+            if (extractedProjectName) {
+              iOSProjectName = extractedProjectName;
+            } else {
+              // Fallback to current directory name with sanitization
+              const baseName = path.basename(process.cwd());
+              iOSProjectName = baseName
+                .replace(/[^a-zA-Z0-9_-]/g, '_') // Replace invalid chars with underscore
+                .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+                .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+                .toLowerCase(); // Convert to lowercase for consistency
+              
+              // If sanitization resulted in empty string, use default
+              if (!iOSProjectName || iOSProjectName.length === 0) {
+                iOSProjectName = 'ios_project';
+              }
             }
           }
-          console.log('[BitBar Package] Project name:', projectName);
+          console.log('[BitBar Package] iOS project name:', iOSProjectName);
           
-          // Create timestamp with consistent format
+          // Create timestamp with specific format: {YYYY}m{MM}d{DD}h{HH}m{mm}
           const now = new Date();
-          const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
-          const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, ''); // HHMMSS
-          const timestamp = `${dateStr}_${timeStr}`;
+          const year = now.getFullYear().toString(); // YYYY
+          const month = (now.getMonth() + 1).toString().padStart(2, '0'); // MM (01-12)
+          const day = now.getDate().toString().padStart(2, '0'); // DD (01-31)
+          const hour = now.getHours().toString().padStart(2, '0'); // HH (00-23)
+          const minute = now.getMinutes().toString().padStart(2, '0'); // mm (00-59)
+          const formattedTimestamp = `${year}m${month}d${day}h${hour}m${minute}`;
+          
+          console.log('[BitBar Package] Generated timestamp:', formattedTimestamp);
           
           // Create BitBarPackages directory if it doesn't exist
           const packagesDir = path.join(process.cwd(), 'BitBarPackages');
@@ -1946,8 +2111,8 @@ class BitBarAppiumTest(unittest.TestCase):
             fs.mkdirSync(packagesDir, { recursive: true });
           }
           
-          // Generate zip filename with predictable format
-          const zipFilename = `BitBar_iOS_test_${projectName}_${timestamp}.zip`;
+          // Generate zip filename with consistent naming structure: {iOS-Project-Name}_test_pkg_{y2025m01d15h14m30}
+          const zipFilename = `${iOSProjectName}_test_pkg_${formattedTimestamp}.zip`;
           const zipPath = path.join(packagesDir, zipFilename);
           console.log('[BitBar Package] Creating zip file:', zipPath);
           
@@ -1999,8 +2164,8 @@ class BitBarAppiumTest(unittest.TestCase):
                     packagePath: zipPath,
                     packageName: zipFilename,
                     bundleId: bundleId,
-                    projectName: projectName,
-                    timestamp: timestamp,
+                    projectName: iOSProjectName,
+                    timestamp: formattedTimestamp,
                     fileSize: fileSize,
                     files: [
                       'run-tests.sh',
@@ -2056,6 +2221,306 @@ class BitBarAppiumTest(unittest.TestCase):
                 message: errorMessage,
                 bundleId: bundleId || 'not-detected',
                 timestamp: new Date().toISOString()
+              }, null, 2) 
+            }],
+          };
+        }
+      }
+    );
+
+    // BitBar IPA Build Tool
+    server.tool(
+      "bitbar_build_ipa",
+      "Build an iOS IPA file for BitBar testing using Xcode build and export commands. This tool validates that it's running in an iOS application project directory, automatically detects the project name, creates an archive, and exports it as an IPA file with consistent naming format: {iOS-Project-Name}_{YYYY}m{MM}d{DD}h{HH}m{mm}.ipa. Requires Xcode and valid iOS project configuration.",
+      {
+        scheme: z.string().optional().describe("Xcode scheme name to build (optional, will auto-detect if not provided)"),
+        configuration: z.string().optional().describe("Build configuration (Debug/Release, defaults to Release)"),
+        archivePath: z.string().optional().describe("Custom archive path (optional, defaults to ./build/{ProjectName}.xcarchive)"),
+        exportPath: z.string().optional().describe("Custom export directory path (optional, defaults to ./build/Export/)"),
+        exportOptionsPlist: z.string().optional().describe("Custom ExportOptions.plist path (optional, will create default if not provided)"),
+        projectName: z.string().optional().describe("Project name for the IPA filename (optional, will detect from current directory)"),
+      },
+      async (args, _extra) => {
+        try {
+          console.log('[BitBar IPA] Starting iOS IPA build process...');
+          
+          // Import required modules
+          const fs = await import('fs');
+          const path = await import('path');
+          const { spawn } = await import('child_process');
+          
+          // Validate that this is an iOS application project
+          console.log('[BitBar IPA] Validating iOS project structure...');
+          const currentDir = process.cwd();
+          const isIOSProject = await this.validateIOSProject(currentDir, fs);
+          
+          if (!isIOSProject) {
+            throw new Error(
+              'This tool can only be used in iOS application projects. ' +
+              'Please ensure you are in a directory containing iOS project files ' +
+              '(such as *.xcodeproj, *.xcworkspace, Info.plist, or other iOS-specific files).'
+            );
+          }
+          
+          console.log('[BitBar IPA] iOS project structure validated successfully');
+          
+          // Auto-detect iOS project name
+          let iOSProjectName = args.projectName;
+          if (!iOSProjectName) {
+            console.log('[BitBar IPA] Auto-detecting iOS project name...');
+            const extractedProjectName = await this.extractIOSProjectName(currentDir, fs);
+            
+            if (extractedProjectName) {
+              iOSProjectName = extractedProjectName;
+            } else {
+              // Fallback to current directory name with sanitization
+              const baseName = path.basename(process.cwd());
+              iOSProjectName = baseName
+                .replace(/[^a-zA-Z0-9_-]/g, '_')
+                .replace(/_{2,}/g, '_')
+                .replace(/^_+|_+$/g, '')
+                .toLowerCase();
+              
+              if (!iOSProjectName || iOSProjectName.length === 0) {
+                iOSProjectName = 'ios_project';
+              }
+            }
+          }
+          console.log('[BitBar IPA] iOS project name:', iOSProjectName);
+          
+          // Create timestamp with specific format: {YYYY}m{MM}d{DD}h{HH}m{mm}
+          const now = new Date();
+          const year = now.getFullYear().toString();
+          const month = (now.getMonth() + 1).toString().padStart(2, '0');
+          const day = now.getDate().toString().padStart(2, '0');
+          const hour = now.getHours().toString().padStart(2, '0');
+          const minute = now.getMinutes().toString().padStart(2, '0');
+          const formattedTimestamp = `${year}m${month}d${day}h${hour}m${minute}`;
+          
+          console.log('[BitBar IPA] Generated timestamp:', formattedTimestamp);
+          
+          // Set up build paths
+          const buildDir = path.join(currentDir, 'build');
+          const archivePath = args.archivePath || path.join(buildDir, `${iOSProjectName}.xcarchive`);
+          const exportPath = args.exportPath || path.join(buildDir, 'Export');
+          const exportOptionsPlist = args.exportOptionsPlist || path.join(currentDir, 'ExportOptions.plist');
+          
+          // Create build directory if it doesn't exist
+          if (!fs.existsSync(buildDir)) {
+            console.log('[BitBar IPA] Creating build directory:', buildDir);
+            fs.mkdirSync(buildDir, { recursive: true });
+          }
+          
+          // Create default ExportOptions.plist if it doesn't exist
+          if (!fs.existsSync(exportOptionsPlist)) {
+            console.log('[BitBar IPA] Creating default ExportOptions.plist');
+            const defaultExportOptions = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>development</string>
+    <key>teamID</key>
+    <string>DEVELOPMENT_TEAM</string>
+    <key>uploadBitcode</key>
+    <false/>
+    <key>uploadSymbols</key>
+    <true/>
+    <key>compileBitcode</key>
+    <false/>
+</dict>
+</plist>`;
+            fs.writeFileSync(exportOptionsPlist, defaultExportOptions);
+          }
+          
+          // Find Xcode project or workspace
+          const items = fs.readdirSync(currentDir);
+          let projectFile = null;
+          let isWorkspace = false;
+          
+          for (const item of items) {
+            if (item.endsWith('.xcworkspace')) {
+              projectFile = item;
+              isWorkspace = true;
+              break;
+            } else if (item.endsWith('.xcodeproj')) {
+              projectFile = item;
+              isWorkspace = false;
+            }
+          }
+          
+          if (!projectFile) {
+            throw new Error('No Xcode project (.xcodeproj) or workspace (.xcworkspace) found in current directory');
+          }
+          
+          console.log(`[BitBar IPA] Using ${isWorkspace ? 'workspace' : 'project'}: ${projectFile}`);
+          
+          // Auto-detect scheme if not provided
+          let scheme = args.scheme;
+          if (!scheme) {
+            // Use project name as scheme (common convention)
+            scheme = projectFile.replace('.xcodeproj', '').replace('.xcworkspace', '');
+            console.log(`[BitBar IPA] Auto-detected scheme: ${scheme}`);
+          }
+          
+          const configuration = args.configuration || 'Release';
+          console.log(`[BitBar IPA] Using configuration: ${configuration}`);
+          
+          // Build archive command
+          const archiveArgs = [
+            '-scheme', scheme,
+            '-configuration', configuration,
+            '-destination', 'generic/platform=iOS',
+            '-archivePath', archivePath,
+            'archive',
+            'CODE_SIGN_STYLE=Automatic'
+          ];
+          
+          if (isWorkspace) {
+            archiveArgs.unshift('-workspace', projectFile);
+          } else {
+            archiveArgs.unshift('-project', projectFile);
+          }
+          
+          console.log('[BitBar IPA] Creating archive...');
+          console.log(`[BitBar IPA] Command: xcodebuild ${archiveArgs.join(' ')}`);
+          
+          // Execute archive command
+          await new Promise<void>((resolve, reject) => {
+            const archiveProcess = spawn('xcodebuild', archiveArgs, {
+              cwd: currentDir,
+              stdio: ['ignore', 'pipe', 'pipe']
+            });
+            
+            let stdout = '';
+            let stderr = '';
+            
+            archiveProcess.stdout?.on('data', (data) => {
+              stdout += data.toString();
+            });
+            
+            archiveProcess.stderr?.on('data', (data) => {
+              stderr += data.toString();
+            });
+            
+            archiveProcess.on('close', (code) => {
+              if (code === 0) {
+                console.log('[BitBar IPA] Archive created successfully');
+                resolve();
+              } else {
+                console.error('[BitBar IPA] Archive failed with code:', code);
+                console.error('[BitBar IPA] Error output:', stderr);
+                reject(new Error(`Archive build failed with exit code ${code}: ${stderr}`));
+              }
+            });
+            
+            archiveProcess.on('error', (error) => {
+              reject(new Error(`Failed to start xcodebuild: ${error.message}`));
+            });
+          });
+          
+          // Export IPA command
+          const exportArgs = [
+            '-exportArchive',
+            '-archivePath', archivePath,
+            '-exportPath', exportPath,
+            '-exportOptionsPlist', exportOptionsPlist
+          ];
+          
+          console.log('[BitBar IPA] Exporting IPA...');
+          console.log(`[BitBar IPA] Command: xcodebuild ${exportArgs.join(' ')}`);
+          
+          // Execute export command
+          await new Promise<void>((resolve, reject) => {
+            const exportProcess = spawn('xcodebuild', exportArgs, {
+              cwd: currentDir,
+              stdio: ['ignore', 'pipe', 'pipe']
+            });
+            
+            let stdout = '';
+            let stderr = '';
+            
+            exportProcess.stdout?.on('data', (data) => {
+              stdout += data.toString();
+            });
+            
+            exportProcess.stderr?.on('data', (data) => {
+              stderr += data.toString();
+            });
+            
+            exportProcess.on('close', (code) => {
+              if (code === 0) {
+                console.log('[BitBar IPA] IPA exported successfully');
+                resolve();
+              } else {
+                console.error('[BitBar IPA] Export failed with code:', code);
+                console.error('[BitBar IPA] Error output:', stderr);
+                reject(new Error(`IPA export failed with exit code ${code}: ${stderr}`));
+              }
+            });
+            
+            exportProcess.on('error', (error) => {
+              reject(new Error(`Failed to start xcodebuild for export: ${error.message}`));
+            });
+          });
+          
+          // Find the exported IPA file and rename it with timestamp
+          const exportedFiles = fs.readdirSync(exportPath);
+          const ipaFile = exportedFiles.find(file => file.endsWith('.ipa'));
+          
+          if (!ipaFile) {
+            throw new Error('No IPA file found in export directory');
+          }
+          
+          const originalIpaPath = path.join(exportPath, ipaFile);
+          const timestampedIpaName = `${iOSProjectName}_${formattedTimestamp}.ipa`;
+          const finalIpaPath = path.join(exportPath, timestampedIpaName);
+          
+          // Rename the IPA file with timestamp
+          fs.renameSync(originalIpaPath, finalIpaPath);
+          console.log(`[BitBar IPA] Renamed IPA to: ${timestampedIpaName}`);
+          
+          // Get file size
+          const stats = fs.statSync(finalIpaPath);
+          const fileSize = stats.size;
+          
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({
+                success: true,
+                ipaPath: finalIpaPath,
+                ipaName: timestampedIpaName,
+                projectName: iOSProjectName,
+                timestamp: formattedTimestamp,
+                fileSize: fileSize,
+                scheme: scheme,
+                configuration: configuration,
+                archivePath: archivePath,
+                exportPath: exportPath,
+                message: `iOS IPA built successfully at ${finalIpaPath}`,
+                originalName: ipaFile
+              }, null, 2)
+            }],
+          };
+          
+        } catch (error) {
+          console.error('[BitBar IPA] Build error:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown build error';
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({ 
+                error: true, 
+                message: errorMessage,
+                timestamp: new Date().toISOString(),
+                suggestions: [
+                  'Ensure Xcode is installed and configured properly',
+                  'Verify that the iOS project builds successfully in Xcode',
+                  'Check that signing certificates are properly configured',
+                  'Ensure the scheme exists and is marked as shared',
+                  'Verify ExportOptions.plist contains valid configuration'
+                ]
               }, null, 2) 
             }],
           };
