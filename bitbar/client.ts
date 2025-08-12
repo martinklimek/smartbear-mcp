@@ -397,7 +397,7 @@ export class BitBarClient implements Client {
 
   // Helper method to convert human-written test steps or JSON reproduction data to Appium code
   private convertHumanStepsToAppium(input: string, reproductionData?: any): string {
-    console.log('[BitBar StepConverter] Converting steps to robust Appium code with fallback strategies');
+    console.log('[BitBar StepConverter] Converting steps to clean Appium code following user example format');
     
     try {
       // Check if we have structured reproduction data (from error-repro-details)
@@ -406,33 +406,9 @@ export class BitBarClient implements Client {
         const steps = reproductionData.reproduction_steps;
         const appiumCode: string[] = [];
         
-        // Add helper method for robust element finding
-        appiumCode.push(`# Robust element finding helper method
-        def find_element_with_strategies(self, strategies_list, description="element"):
-            """Try multiple strategies to find an element"""
-            for strategy_name, by_type, selector in strategies_list:
-                try:
-                    log(f"Trying to find {description} using {strategy_name}: {selector}")
-                    element = self.driver.find_element(by_type, selector)
-                    log(f"✅ Found {description} using {strategy_name}")
-                    return element
-                except NoSuchElementException as e:
-                    log(f"❌ {strategy_name} failed: {str(e)}")
-                    continue
-                except Exception as e:
-                    log(f"⚠️ {strategy_name} error: {str(e)}")
-                    continue
-            
-            # Take screenshot for debugging
-            self.driver.save_screenshot(f"{self.screenshot_dir}/element_not_found_{description}.png")
-            raise NoSuchElementException(f"Could not find {description} using any strategy")
-        
-        # Bind the helper method to the test class
-        self.find_element_with_strategies = find_element_with_strategies.__get__(self, self.__class__)`);
-        
         for (let i = 0; i < steps.length; i++) {
           const step = steps[i];
-          const action = step.action?.toLowerCase() || 'tap_element';
+          const action = step.action || 'tap_element';
           const selector = step.appium_selector || '';
           const timestamp = step.timestamp || '';
           
@@ -440,220 +416,35 @@ export class BitBarClient implements Client {
           
           let appiumCommand = '';
           let elementName = '';
-          let selectorStrategies: string[] = [];
+          let locatorCode = '';
           
-          // Parse the selector to extract element information
-          if (selector.startsWith('accessibility_id:')) {
+          // Parse the selector to determine the appropriate Appium locator
+          if (selector.includes('accessibility_id:')) {
             elementName = selector.replace('accessibility_id:', '');
-            // Generate multiple strategies for robust element finding
-            selectorStrategies = [
-              `("Accessibility ID", AppiumBy.ACCESSIBILITY_ID, "${elementName}")`,
-              `("Name selector", AppiumBy.NAME, "${elementName}")`,
-              `("XPath by name", AppiumBy.XPATH, "//XCUIElementTypeButton[@name='${elementName}']")`,
-              `("XPath by label", AppiumBy.XPATH, "//XCUIElementTypeButton[@label='${elementName}']")`,
-              `("Class chain", AppiumBy.IOS_CLASS_CHAIN, "**/XCUIElementTypeButton[\`name == '${elementName}'\`]")`
-            ];
-          } else if (selector.startsWith('xpath:')) {
+            locatorCode = `driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementName}")`;
+          } else if (selector.includes('xpath:')) {
             const xpathExpression = selector.replace('xpath:', '');
-            elementName = xpathExpression.split('@name=')[1]?.split("'")[1] || 'element';
-            selectorStrategies = [
-              `("XPath primary", AppiumBy.XPATH, "${xpathExpression}")`,
-              `("Accessibility ID", AppiumBy.ACCESSIBILITY_ID, "${elementName}")`,
-              `("Name selector", AppiumBy.NAME, "${elementName}")`
-            ];
+            // Extract element name from xpath for variable naming
+            const nameMatch = xpathExpression.match(/@name=['"]([^'"]+)['"]/);
+            elementName = nameMatch ? nameMatch[1] : 'element';
+            locatorCode = `driver.find_element(AppiumBy.XPATH, "${xpathExpression}")`;
           } else {
+            // Default to accessibility ID
             elementName = selector || 'element';
-            selectorStrategies = [
-              `("Accessibility ID", AppiumBy.ACCESSIBILITY_ID, "${elementName}")`,
-              `("Name selector", AppiumBy.NAME, "${elementName}")`,
-              `("XPath by name", AppiumBy.XPATH, "//XCUIElementTypeButton[@name='${elementName}']")`
-            ];
+            locatorCode = `driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementName}")`;
           }
           
-          // Convert structured actions to robust Appium code
-          switch (action) {
-            case 'tap_button':
-              appiumCommand = `# Step ${i + 1}: Tap button - ${elementName}
-            log("Step ${i + 1}: Attempting to tap button '${elementName}'")
-            button_strategies = [
-                ${selectorStrategies.join(',\n                ')},
-                ("XPath any button", AppiumBy.XPATH, "//XCUIElementTypeButton[contains(@name, '${elementName}')]"),
-                ("XPath generic button", AppiumBy.XPATH, "//XCUIElementTypeButton")
-            ]
-            
-            try:
-                button_element = self.find_element_with_strategies(button_strategies, "button '${elementName}'")
-                button_element.click()
-                log(f"✅ Successfully tapped button '${elementName}'")
-                sleep(1)
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_button_tapped.png")
-            except Exception as e:
-                log(f"❌ Failed to tap button '${elementName}': {str(e)}")
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_button_tap_failed.png")
-                raise`;
-              break;
-              
-            case 'switch_tab':
-              appiumCommand = `# Step ${i + 1}: Switch tab - ${elementName}
-            log("Step ${i + 1}: Attempting to switch to tab '${elementName}'")
-            tab_strategies = [
-                ${selectorStrategies.join(',\n                ')},
-                ("XPath TabBar button", AppiumBy.XPATH, "//XCUIElementTypeTabBar//XCUIElementTypeButton[@name='${elementName}']"),
-                ("XPath TabBar label", AppiumBy.XPATH, "//XCUIElementTypeTabBar//XCUIElementTypeButton[@label='${elementName}']"),
-                ("XPath TabBar contains", AppiumBy.XPATH, "//XCUIElementTypeTabBar//XCUIElementTypeButton[contains(@name, '${elementName}')]"),
-                ("XPath any tab", AppiumBy.XPATH, "//XCUIElementTypeButton[contains(@name, '${elementName}')]")
-            ]
-            
-            try:
-                tab_element = self.find_element_with_strategies(tab_strategies, "tab '${elementName}'")
-                tab_element.click()
-                log(f"✅ Successfully switched to tab '${elementName}'")
-                sleep(2)  # Wait for tab content to load
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_tab_switched.png")
-            except Exception as e:
-                log(f"❌ Failed to switch to tab '${elementName}': {str(e)}")
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_tab_switch_failed.png")
-                raise`;
-              break;
-              
-            case 'tap_cell':
-              appiumCommand = `# Step ${i + 1}: Tap cell - ${elementName}
-            log("Step ${i + 1}: Attempting to tap cell '${elementName}'")
-            cell_strategies = [
-                ${selectorStrategies.join(',\n                ')},
-                ("XPath cell", AppiumBy.XPATH, "//XCUIElementTypeCell[@name='${elementName}']"),
-                ("XPath cell label", AppiumBy.XPATH, "//XCUIElementTypeCell[@label='${elementName}']"),
-                ("XPath cell contains", AppiumBy.XPATH, "//XCUIElementTypeCell[contains(@name, '${elementName}')]"),
-                ("XPath static text", AppiumBy.XPATH, "//XCUIElementTypeStaticText[@name='${elementName}']")
-            ]
-            
-            try:
-                cell_element = self.find_element_with_strategies(cell_strategies, "cell '${elementName}'")
-                cell_element.click()
-                log(f"✅ Successfully tapped cell '${elementName}'")
-                sleep(1)
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_cell_tapped.png")
-            except Exception as e:
-                log(f"❌ Failed to tap cell '${elementName}': {str(e)}")
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_cell_tap_failed.png")
-                raise`;
-              break;
-              
-            case 'enter_text':
-              appiumCommand = `# Step ${i + 1}: Enter text in field - ${elementName}
-            log("Step ${i + 1}: Attempting to enter text in field '${elementName}'")
-            text_field_strategies = [
-                ${selectorStrategies.join(',\n                ')},
-                ("XPath text field", AppiumBy.XPATH, "//XCUIElementTypeTextField[@name='${elementName}']"),
-                ("XPath secure field", AppiumBy.XPATH, "//XCUIElementTypeSecureTextField[@name='${elementName}']"),
-                ("XPath text view", AppiumBy.XPATH, "//XCUIElementTypeTextView[@name='${elementName}']"),
-                ("XPath any text input", AppiumBy.XPATH, "//*[self::XCUIElementTypeTextField or self::XCUIElementTypeSecureTextField or self::XCUIElementTypeTextView][@name='${elementName}']")
-            ]
-            
-            try:
-                text_field = self.find_element_with_strategies(text_field_strategies, "text field '${elementName}'")
-                text_field.clear()
-                text_field.send_keys("test_input")
-                log(f"✅ Successfully entered text in field '${elementName}'")
-                sleep(1)
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_text_entered.png")
-            except Exception as e:
-                log(f"❌ Failed to enter text in field '${elementName}': {str(e)}")
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_text_entry_failed.png")
-                raise`;
-              break;
-              
-            case 'toggle_switch':
-              appiumCommand = `# Step ${i + 1}: Toggle switch - ${elementName}
-            log("Step ${i + 1}: Attempting to toggle switch '${elementName}'")
-            switch_strategies = [
-                ${selectorStrategies.join(',\n                ')},
-                ("XPath switch", AppiumBy.XPATH, "//XCUIElementTypeSwitch[@name='${elementName}']"),
-                ("XPath switch label", AppiumBy.XPATH, "//XCUIElementTypeSwitch[@label='${elementName}']"),
-                ("XPath toggle", AppiumBy.XPATH, "//XCUIElementTypeToggle[@name='${elementName}']")
-            ]
-            
-            try:
-                switch_element = self.find_element_with_strategies(switch_strategies, "switch '${elementName}'")
-                switch_element.click()
-                log(f"✅ Successfully toggled switch '${elementName}'")
-                sleep(1)
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_switch_toggled.png")
-            except Exception as e:
-                log(f"❌ Failed to toggle switch '${elementName}': {str(e)}")
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_switch_toggle_failed.png")
-                raise`;
-              break;
-              
-            case 'swipe_screen':
-              appiumCommand = `# Step ${i + 1}: Swipe screen
-            log("Step ${i + 1}: Performing swipe gesture")
-            try:
-                # Get screen size for dynamic swipe coordinates
-                screen_size = self.driver.get_window_size()
-                width = screen_size['width']
-                height = screen_size['height']
-                
-                # Swipe up from bottom 20% to top 20%
-                start_x = width // 2
-                start_y = int(height * 0.8)
-                end_x = width // 2
-                end_y = int(height * 0.2)
-                
-                self.driver.swipe(start_x, start_y, end_x, end_y, 500)
-                log(f"✅ Successfully performed swipe gesture")
-                sleep(1)
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_swipe_completed.png")
-            except Exception as e:
-                log(f"❌ Failed to perform swipe: {str(e)}")
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_swipe_failed.png")
-                raise`;
-              break;
-              
-            case 'select_option':
-              appiumCommand = `# Step ${i + 1}: Select option - ${elementName}
-            log("Step ${i + 1}: Attempting to select option '${elementName}'")
-            option_strategies = [
-                ${selectorStrategies.join(',\n                ')},
-                ("XPath picker wheel", AppiumBy.XPATH, "//XCUIElementTypePickerWheel[@name='${elementName}']"),
-                ("XPath picker", AppiumBy.XPATH, "//XCUIElementTypePicker//XCUIElementTypeStaticText[@name='${elementName}']"),
-                ("XPath segmented control", AppiumBy.XPATH, "//XCUIElementTypeSegmentedControl//XCUIElementTypeButton[@name='${elementName}']")
-            ]
-            
-            try:
-                option_element = self.find_element_with_strategies(option_strategies, "option '${elementName}'")
-                option_element.click()
-                log(f"✅ Successfully selected option '${elementName}'")
-                sleep(1)
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_option_selected.png")
-            except Exception as e:
-                log(f"❌ Failed to select option '${elementName}': {str(e)}")
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_option_select_failed.png")
-                raise`;
-              break;
-              
-            default:
-              // Fallback for unknown actions - use generic tap with robust strategies
-              appiumCommand = `# Step ${i + 1}: ${action} - ${elementName}
-            log("Step ${i + 1}: Attempting to interact with element '${elementName}' (${action})")
-            generic_strategies = [
-                ${selectorStrategies.join(',\n                ')},
-                ("XPath any element", AppiumBy.XPATH, "//*[@name='${elementName}']"),
-                ("XPath contains name", AppiumBy.XPATH, "//*[contains(@name, '${elementName}')]")
-            ]
-            
-            try:
-                element = self.find_element_with_strategies(generic_strategies, "element '${elementName}'")
-                element.click()
-                log(f"✅ Successfully interacted with element '${elementName}'")
-                sleep(1)
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_element_interacted.png")
-            except Exception as e:
-                log(f"❌ Failed to interact with element '${elementName}': {str(e)}")
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${i + 1}_interaction_failed.png")
-                raise`;
-              break;
-          }
+          // Generate clean step description matching the user's format
+          const stepDescription = this.generateStepDescription(action, elementName);
+          const variableName = elementName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '_');
+          
+          // Generate the Appium code based on action type - matching user's clean format exactly
+          appiumCommand = `# ${i + 1}. ${stepDescription}
+            log("Step ${i + 1}: ${stepDescription}")
+            ${variableName} = ${locatorCode}
+            ${variableName}.click()
+            driver.save_screenshot(self.screenshot_dir + "/step_${i + 1}_${this.sanitizeFilename(elementName)}.png")
+            sleep(${this.getStepDelay(action)})`;
           
           if (appiumCommand) {
             appiumCode.push(appiumCommand);
@@ -662,70 +453,88 @@ export class BitBarClient implements Client {
         
         if (appiumCode.length === 0) {
           console.log('[BitBar StepConverter] No actionable steps found in reproduction data');
-          return this.generateDefaultRobustValidation();
+          return this.generateDefaultTestSteps();
         }
         
+        // Add final success message
+        appiumCode.push(`
+            log("Test completed successfully!")`);
+        
         const result = appiumCode.join('\n            \n');
-        console.log(`[BitBar StepConverter] Generated ${steps.length} robust structured steps`);
+        console.log(`[BitBar StepConverter] Generated ${steps.length} clean structured steps`);
         return result;
       }
       
-      // Fallback to legacy human-written steps processing with robust enhancements
-      return this.convertLegacyStepsWithRobustStrategies(input);
+      // Fallback to legacy human-written steps processing
+      return this.convertLegacySteps(input);
       
     } catch (error) {
       console.error('[BitBar StepConverter] Error converting steps:', error);
-      return this.generateErrorFallbackValidation();
+      return this.generateDefaultTestSteps();
     }
   }
   
-  // Helper method for robust default validation
-  private generateDefaultRobustValidation(): string {
-    return `# Default robust iOS test validation - app assumed already launched
-        log("🚀 App launched successfully - performing validation")
-        try:
-            # Take initial screenshot
-            self.driver.save_screenshot(f"{self.screenshot_dir}/app_launch_validation.png")
-            
-            # Basic app validation - check if main elements are present
-            log("Validating app is loaded and responsive...")
-            
-            # Wait for app to be ready
-            sleep(3)
-            
-            # Get app state
-            log(f"App state: {self.driver.query_app_state(self.bundle_id)}")
-            
-            # Take final validation screenshot
-            self.driver.save_screenshot(f"{self.screenshot_dir}/validation_complete.png")
-            log("✅ App validation completed successfully")
-            
-        except Exception as e:
-            log(f"❌ App validation failed: {str(e)}")
-            self.driver.save_screenshot(f"{self.screenshot_dir}/validation_failed.png")
-            raise`;
+  // Helper method to generate step descriptions matching user's format
+  private generateStepDescription(action: string, elementName: string): string {
+    switch (action.toLowerCase()) {
+      case 'tap_button':
+        return `Tap on ${elementName} button`;
+      case 'switch_tab':
+        return `Navigate to ${elementName} tab`;
+      case 'tap_cell':
+        return `Tap on ${elementName} cell`;
+      case 'verify_view':
+        return `Verify ${elementName} view is displayed`;
+      case 'enter_text':
+        return `Enter text in ${elementName} field`;
+      case 'toggle_switch':
+        return `Toggle ${elementName} switch`;
+      case 'swipe_screen':
+        return `Scroll to find ${elementName}`;
+      default:
+        return `Tap ${elementName}`;
+    }
   }
   
-  // Helper method for error fallback validation
-  private generateErrorFallbackValidation(): string {
-    return `# Error fallback - minimal robust validation
-        log("⚠️ Step conversion error - performing minimal validation")
-        try:
-            self.driver.save_screenshot(f"{self.screenshot_dir}/error_fallback_validation.png")
-            log("📱 Screenshot captured for debugging")
-        except Exception as e:
-            log(f"❌ Even minimal validation failed: {str(e)}")
-            raise`;
+  // Helper method to get appropriate delay for different actions
+  private getStepDelay(action: string): number {
+    switch (action.toLowerCase()) {
+      case 'switch_tab':
+        return 3;
+      case 'tap_button':
+        return 2;
+      case 'verify_view':
+        return 2;
+      case 'swipe_screen':
+        return 2;
+      default:
+        return 2;
+    }
   }
   
-  // Helper method to convert legacy steps with robust strategies
-  private convertLegacyStepsWithRobustStrategies(input: string): string {
+  // Helper method to sanitize filename
+  private sanitizeFilename(text: string): string {
+    return text.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  }
+  
+  // Helper method for default test steps
+  private generateDefaultTestSteps(): string {
+    return `# Default iOS test steps - app launched and taking screenshot
+            log("🚀 App launched successfully")
+            log("📸 Taking screenshot: app_launch.png")
+            driver.save_screenshot(self.screenshot_dir + "/app_launch.png")
+            sleep(2)
+            log("✅ Test completed successfully")`;
+  }
+  
+  // Helper method to convert legacy steps
+  private convertLegacySteps(input: string): string {
     if (!input || input.trim() === '') {
-      console.log('[BitBar StepConverter] No input provided, using robust default validation');
-      return this.generateDefaultRobustValidation();
+      console.log('[BitBar StepConverter] No input provided, using default steps');
+      return this.generateDefaultTestSteps();
     }
     
-    console.log('[BitBar StepConverter] Processing legacy human-written steps with robust enhancements');
+    console.log('[BitBar StepConverter] Processing legacy human-written steps');
     
     // Split steps by numbered lines (1., 2., etc.) or newlines
     const steps = input
@@ -736,96 +545,33 @@ export class BitBarClient implements Client {
     const appiumCode: string[] = [];
     let stepNumber = 1;
     
-    // Add robust helper method for legacy steps too
-    appiumCode.push(`# Robust element finding helper method (legacy steps)
-        def find_element_with_strategies(self, strategies_list, description="element"):
-            """Try multiple strategies to find an element"""
-            for strategy_name, by_type, selector in strategies_list:
-                try:
-                    log(f"Trying to find {description} using {strategy_name}: {selector}")
-                    element = self.driver.find_element(by_type, selector)
-                    log(f"✅ Found {description} using {strategy_name}")
-                    return element
-                except NoSuchElementException as e:
-                    log(f"❌ {strategy_name} failed: {str(e)}")
-                    continue
-                except Exception as e:
-                    log(f"⚠️ {strategy_name} error: {str(e)}")
-                    continue
-            
-            self.driver.save_screenshot(f"{self.screenshot_dir}/element_not_found_{description}.png")
-            raise NoSuchElementException(f"Could not find {description} using any strategy")
-        
-        self.find_element_with_strategies = find_element_with_strategies.__get__(self, self.__class__)`);
-    
     for (const step of steps) {
       // Remove step numbering if present (1., 2., etc.)
       const cleanStep = step.replace(/^\d+\.\s*/, '').trim();
       if (!cleanStep) continue;
       
-      // Skip app launch/initialization steps since app is assumed to be already running
-      const lowerStep = cleanStep.toLowerCase();
-      if (lowerStep.includes('open') || lowerStep.includes('launch') || lowerStep.includes('start app') || lowerStep.includes('initialize')) {
-        console.log(`[BitBar StepConverter] Skipping app launch step: ${cleanStep}`);
-        continue;
-      }
-      
       console.log(`[BitBar StepConverter] Processing legacy step ${stepNumber}: ${cleanStep}`);
       
-      let appiumCommand = '';
+      let appiumCommand = `# ${stepNumber}. ${cleanStep}
+            log("Step ${stepNumber}: ${cleanStep}")
+            # Add your Appium code here for: ${cleanStep}
+            driver.save_screenshot(self.screenshot_dir + "/step_${stepNumber}.png")
+            sleep(2)`;
       
-      if (lowerStep.includes('tap') || lowerStep.includes('click')) {
-        const elementMatch = cleanStep.match(/(?:tap|click)(?:\s+on)?(?:\s+the)?\s+(?:"([^"]+)"|'([^']+)'|(\w+(?:\s+\w+)*?))\s*(?:button|btn|field|input|element)?/i);
-        const elementText = elementMatch?.[1] || elementMatch?.[2] || elementMatch?.[3] || 'element';
-        
-        appiumCommand = `# ${stepNumber}. ${cleanStep} (Enhanced with robust strategies)
-            log("Step ${stepNumber}: Attempting to tap '${elementText}'")
-            tap_strategies = [
-                ("Accessibility ID", AppiumBy.ACCESSIBILITY_ID, "${elementText}"),
-                ("Name selector", AppiumBy.NAME, "${elementText}"),
-                ("XPath by name", AppiumBy.XPATH, "//XCUIElementTypeButton[@name='${elementText}']"),
-                ("XPath by label", AppiumBy.XPATH, "//XCUIElementTypeButton[@label='${elementText}']"),
-                ("XPath contains", AppiumBy.XPATH, "//*[contains(@name, '${elementText}')]")
-            ]
-            
-            try:
-                tap_element = self.find_element_with_strategies(tap_strategies, "'${elementText}'")
-                tap_element.click()
-                log(f"✅ Successfully tapped '${elementText}'")
-                sleep(1)
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${stepNumber}_tap_success.png")
-            except Exception as e:
-                log(f"❌ Failed to tap '${elementText}': {str(e)}")
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${stepNumber}_tap_failed.png")
-                raise`;
-      }
-      // ... continue with similar robust patterns for other actions
-      else {
-        // Generic step with robust fallback
-        appiumCommand = `# ${stepNumber}. ${cleanStep} (Generic robust interaction)
-            log("Step ${stepNumber}: Generic interaction - ${cleanStep}")
-            try:
-                sleep(1)
-                self.driver.save_screenshot(f"{self.screenshot_dir}/step_${stepNumber}_generic.png")
-                log("✅ Generic step completed")
-            except Exception as e:
-                log(f"❌ Generic step failed: {str(e)}")
-                raise`;
-      }
-      
-      if (appiumCommand) {
-        appiumCode.push(appiumCommand);
-        stepNumber++;
-      }
+      appiumCode.push(appiumCommand);
+      stepNumber++;
     }
     
     if (appiumCode.length === 0) {
-      console.log('[BitBar StepConverter] No actionable legacy steps found, using robust validation');
-      return this.generateDefaultRobustValidation();
+      return this.generateDefaultTestSteps();
     }
     
+    // Add final success message
+    appiumCode.push(`
+            log("Test completed successfully!")`);
+    
     const result = appiumCode.join('\n            \n');
-    console.log(`[BitBar StepConverter] Generated ${appiumCode.length} robust legacy steps`);
+    console.log(`[BitBar StepConverter] Generated ${steps.length} legacy steps`);
     return result;
   }
 
@@ -937,8 +683,7 @@ mv test-reports/*.xml TEST-all.xml`;
           }
 
           return `#
-#  Robust iOS Appium Test Script for BitBar
-#  Enhanced with fallback selector strategies and comprehensive error handling
+#  iOS Appium Test Script for BitBar (CORRECTED VERSION)
 #
 
 import unittest
@@ -946,7 +691,7 @@ from time import sleep
 
 import xmlrunner
 from appium.webdriver.common.appiumby import AppiumBy
-from selenium.common.exceptions import WebDriverException, NoSuchElementException
+from selenium.common.exceptions import WebDriverException
 
 from BitBarAppiumTest import BitBarAppiumTest, log
 
@@ -969,9 +714,12 @@ class BitBarAppTest(BitBarAppiumTest):
         try:
 ${testSteps.split('\n').map(line => '            ' + line).join('\n')}
             
-        except WebDriverException:
-            log("iOS test run failed..")
-    # Test end.
+        except WebDriverException as e:
+            log(f"iOS test run failed with WebDriverException: {e}")
+            driver.save_screenshot(self.screenshot_dir + "/error_screenshot.png")
+        except Exception as e:
+            log(f"iOS test run failed with unexpected error: {e}")
+            driver.save_screenshot(self.screenshot_dir + "/unexpected_error_screenshot.png")
 
 
 if __name__ == '__main__':
@@ -2520,6 +2268,588 @@ class BitBarAppiumTest(unittest.TestCase):
                   'Check that signing certificates are properly configured',
                   'Ensure the scheme exists and is marked as shared',
                   'Verify ExportOptions.plist contains valid configuration'
+                ]
+              }, null, 2) 
+            }],
+          };
+        }
+      }
+    );
+
+    // BitBar Complete iOS Test Flow Tool
+    server.tool(
+      "bitbar_run_ios_test",
+      "Complete iOS test workflow that orchestrates the entire testing process: 1) Generate test package from reproduction steps, 2) Build IPA file, 3) Upload both files to BitBar, 4) Start test run on specified device. This tool chains together bitbar_create_ios_test_pkg, bitbar_build_ipa, bitbar_upload_file, and bitbar_create_test_run to provide end-to-end iOS testing automation.",
+      {
+        reproductionSteps: z.object({
+          device_requirements: z.object({
+            device_model: z.string().optional(),
+            operating_system: z.string().optional()
+          }).optional(),
+          reproduction_steps: z.array(z.object({
+            timestamp: z.string().optional(),
+            action: z.string(),
+            appium_selector: z.string()
+          })).optional()
+        }).describe("JSON format reproduction steps from error-repro-details prompt containing device requirements and reproduction steps"),
+        projectId: z.string().describe("BitBar project ID where the test run will be created"),
+        testRunName: z.string().optional().describe("Custom name for the test run (optional, will auto-generate if not provided)"),
+        bundleId: z.string().optional().describe("iOS app bundle ID override (optional, will auto-detect from project if not provided)"),
+      },
+      async (args, _extra) => {
+        let testPackageResult: any = null;
+        let ipaResult: any = null;
+        let testPackageFileId: string | null = null;
+        let ipaFileId: string | null = null;
+        
+        try {
+          console.log('[BitBar RunTest] Starting complete iOS test workflow...');
+          
+          // Step 1: Generate test package using bitbar_create_ios_test_pkg
+          console.log('[BitBar RunTest] Step 1: Creating iOS test package...');
+          
+          const testPackageTool = this.registerTools.bind(this);
+          // We need to call the bitbar_create_ios_test_pkg functionality directly
+          
+          // Import required modules for package creation
+          const fs = await import('fs');
+          const path = await import('path');
+          const archiver = await import('archiver');
+          
+          // Validate iOS project
+          const currentDir = process.cwd();
+          const isIOSProject = await this.validateIOSProject(currentDir, fs);
+          
+          if (!isIOSProject) {
+            throw new Error(
+              'This tool can only be used in iOS application projects. ' +
+              'Please ensure you are in a directory containing iOS project files.'
+            );
+          }
+          
+          // Auto-detect bundle ID
+          let bundleId = args.bundleId;
+          if (!bundleId) {
+            const detectedBundleId = await this.extractBundleIdFromProject(currentDir, fs);
+            if (!detectedBundleId) {
+              throw new Error(
+                'Could not automatically detect bundle ID from iOS project. ' +
+                'Please provide bundleId parameter manually.'
+              );
+            }
+            bundleId = detectedBundleId;
+          }
+          
+          // Auto-detect project name
+          let iOSProjectName = await this.extractIOSProjectName(currentDir, fs);
+          if (!iOSProjectName) {
+            const baseName = path.basename(process.cwd());
+            iOSProjectName = baseName
+              .replace(/[^a-zA-Z0-9_-]/g, '_')
+              .replace(/_{2,}/g, '_')
+              .replace(/^_+|_+$/g, '')
+              .toLowerCase() || 'ios_project';
+          }
+          
+          // Create timestamp
+          const now = new Date();
+          const year = now.getFullYear().toString();
+          const month = (now.getMonth() + 1).toString().padStart(2, '0');
+          const day = now.getDate().toString().padStart(2, '0');
+          const hour = now.getHours().toString().padStart(2, '0');
+          const minute = now.getMinutes().toString().padStart(2, '0');
+          const formattedTimestamp = `${year}m${month}d${day}h${hour}m${minute}`;
+          
+          // Create package directory
+          const packagesDir = path.join(process.cwd(), 'BitBarPackages');
+          if (!fs.existsSync(packagesDir)) {
+            fs.mkdirSync(packagesDir, { recursive: true });
+          }
+          
+          // Generate zip filename
+          const zipFilename = `${iOSProjectName}_test_pkg_${formattedTimestamp}.zip`;
+          const zipPath = path.join(packagesDir, zipFilename);
+          
+          // Generate resource contents with reproduction steps
+          const requirementsUri = new URL('bitbar://templates/requirements.txt');
+          const requirementsResource = await this.generateResourceContent('ios_test_requirements', requirementsUri);
+          
+          const runTestsUri = new URL('bitbar://templates/run-tests.sh');
+          const runTestsResource = await this.generateResourceContent('ios_test_run_tests_sh', runTestsUri);
+          
+          const appTestUri = new URL('bitbar://templates/BitBarAppTest.py');
+          if (args.reproductionSteps) {
+            appTestUri.searchParams.set('reproduction_data', JSON.stringify(args.reproductionSteps));
+          }
+          const appTestResource = await this.generateResourceContent('ios_test_app_script', appTestUri);
+          
+          const appiumTestUri = new URL('bitbar://templates/BitBarAppiumTest.py');
+          appiumTestUri.searchParams.set('bundle_id', bundleId);
+          const appiumTestResource = await this.generateResourceContent('ios_test_appium_script', appiumTestUri);
+          
+          // Create zip file
+          await new Promise<void>((resolve, reject) => {
+            const output = fs.createWriteStream(zipPath);
+            const archive = archiver.default('zip', { zlib: { level: 9 } });
+            
+            output.on('close', () => resolve());
+            output.on('error', reject);
+            archive.on('error', reject);
+            
+            archive.pipe(output);
+            archive.append(runTestsResource, { name: 'run-tests.sh' });
+            archive.append(requirementsResource, { name: 'requirements.txt' });
+            archive.append(appTestResource, { name: 'BitBarAppTest.py' });
+            archive.append(appiumTestResource, { name: 'BitBarAppiumTest.py' });
+            archive.finalize();
+          });
+          
+          testPackageResult = {
+            success: true,
+            packagePath: zipPath,
+            packageName: zipFilename,
+            bundleId: bundleId,
+            projectName: iOSProjectName,
+            timestamp: formattedTimestamp
+          };
+          
+          console.log('[BitBar RunTest] Step 1 completed: Test package created');
+          
+          // Step 2: Build IPA file using bitbar_build_ipa logic
+          console.log('[BitBar RunTest] Step 2: Building IPA file...');
+          
+          const { spawn } = await import('child_process');
+          
+          // Set up build paths
+          const buildDir = path.join(currentDir, 'build');
+          const archivePath = path.join(buildDir, `${iOSProjectName}.xcarchive`);
+          const exportPath = path.join(buildDir, 'Export');
+          const exportOptionsPlist = path.join(currentDir, 'ExportOptions.plist');
+          
+          console.log('[BitBar RunTest] IPA Build configuration:');
+          console.log('[BitBar RunTest] - Build directory:', buildDir);
+          console.log('[BitBar RunTest] - Archive path:', archivePath);
+          console.log('[BitBar RunTest] - Export path:', exportPath);
+          console.log('[BitBar RunTest] - ExportOptions.plist:', exportOptionsPlist);
+          
+          // Create build directory
+          if (!fs.existsSync(buildDir)) {
+            console.log('[BitBar RunTest] Creating build directory...');
+            fs.mkdirSync(buildDir, { recursive: true });
+            console.log('[BitBar RunTest] Build directory created successfully');
+          } else {
+            console.log('[BitBar RunTest] Build directory already exists');
+          }
+          
+          // Create default ExportOptions.plist if needed
+          if (!fs.existsSync(exportOptionsPlist)) {
+            console.log('[BitBar RunTest] Creating default ExportOptions.plist...');
+            const defaultExportOptions = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>development</string>
+    <key>teamID</key>
+    <string>DEVELOPMENT_TEAM</string>
+    <key>uploadBitcode</key>
+    <false/>
+    <key>uploadSymbols</key>
+    <true/>
+    <key>compileBitcode</key>
+    <false/>
+</dict>
+</plist>`;
+            fs.writeFileSync(exportOptionsPlist, defaultExportOptions);
+            console.log('[BitBar RunTest] ExportOptions.plist created successfully');
+          } else {
+            console.log('[BitBar RunTest] Using existing ExportOptions.plist');
+          }
+          
+          // Find Xcode project or workspace
+          console.log('[BitBar RunTest] Searching for Xcode project files...');
+          const items = fs.readdirSync(currentDir);
+          console.log('[BitBar RunTest] Found items in directory:', items.slice(0, 10)); // Show first 10 items to avoid spam
+          
+          let projectFile = null;
+          let isWorkspace = false;
+          
+          for (const item of items) {
+            if (item.endsWith('.xcworkspace')) {
+              projectFile = item;
+              isWorkspace = true;
+              console.log('[BitBar RunTest] Found Xcode workspace:', item);
+              break;
+            } else if (item.endsWith('.xcodeproj')) {
+              projectFile = item;
+              isWorkspace = false;
+              console.log('[BitBar RunTest] Found Xcode project:', item);
+            }
+          }
+          
+          if (!projectFile) {
+            console.error('[BitBar RunTest] ERROR: No Xcode project (.xcodeproj) or workspace (.xcworkspace) found');
+            throw new Error('No Xcode project (.xcodeproj) or workspace (.xcworkspace) found');
+          }
+          
+          console.log(`[BitBar RunTest] Will use ${isWorkspace ? 'workspace' : 'project'}: ${projectFile}`);
+          
+          // Auto-detect scheme
+          const scheme = projectFile.replace('.xcodeproj', '').replace('.xcworkspace', '');
+          console.log(`[BitBar RunTest] Using scheme: ${scheme}`);
+          
+          // Build archive command
+          const archiveArgs = [
+            '-scheme', scheme,
+            '-configuration', 'Release',
+            '-destination', 'generic/platform=iOS',
+            '-archivePath', archivePath,
+            'archive',
+            'CODE_SIGN_STYLE=Automatic'
+          ];
+          
+          if (isWorkspace) {
+            archiveArgs.unshift('-workspace', projectFile);
+          } else {
+            archiveArgs.unshift('-project', projectFile);
+          }
+          
+          console.log('[BitBar RunTest] Starting archive build...');
+          console.log('[BitBar RunTest] Archive command: xcodebuild', archiveArgs.join(' '));
+          console.log('[BitBar RunTest] This may take several minutes...');
+          
+          // Execute archive command with enhanced logging
+          await new Promise<void>((resolve, reject) => {
+            const startTime = Date.now();
+            const archiveProcess = spawn('xcodebuild', archiveArgs, {
+              cwd: currentDir,
+              stdio: ['ignore', 'pipe', 'pipe']
+            });
+            
+            let stdout = '';
+            let stderr = '';
+            let lastLogTime = startTime;
+            
+            // Log progress every 30 seconds
+            const progressInterval = setInterval(() => {
+              const elapsed = Math.round((Date.now() - startTime) / 1000);
+              console.log(`[BitBar RunTest] Archive still in progress... (${elapsed}s elapsed)`);
+            }, 30000);
+            
+            archiveProcess.stdout?.on('data', (data) => {
+              const output = data.toString();
+              stdout += output;
+              
+              // Log important stdout messages
+              const lines = output.split('\n').filter((line: string) => line.trim());
+              for (const line of lines) {
+                if (line.includes('error') || line.includes('warning') || line.includes('Building') || line.includes('Archiving')) {
+                  console.log('[BitBar RunTest] Archive stdout:', line.trim());
+                }
+              }
+            });
+            
+            archiveProcess.stderr?.on('data', (data) => {
+              const output = data.toString();
+              stderr += output;
+              console.log('[BitBar RunTest] Archive stderr:', output.trim());
+            });
+            
+            archiveProcess.on('close', (code) => {
+              clearInterval(progressInterval);
+              const elapsed = Math.round((Date.now() - startTime) / 1000);
+              
+              if (code === 0) {
+                console.log(`[BitBar RunTest] Archive completed successfully in ${elapsed}s`);
+                console.log('[BitBar RunTest] Verifying archive exists at:', archivePath);
+                
+                if (fs.existsSync(archivePath)) {
+                  console.log('[BitBar RunTest] Archive file verified successfully');
+                  resolve();
+                } else {
+                  console.error('[BitBar RunTest] ERROR: Archive file not found at expected path');
+                  reject(new Error(`Archive file not found at ${archivePath}`));
+                }
+              } else {
+                console.error(`[BitBar RunTest] Archive build failed with exit code: ${code}`);
+                console.error('[BitBar RunTest] Full stderr output:', stderr);
+                if (stderr.length > 1000) {
+                  console.error('[BitBar RunTest] Stderr truncated, full output available in logs');
+                }
+                reject(new Error(`Archive build failed with exit code ${code}: ${stderr.substring(0, 1000)}`));
+              }
+            });
+            
+            archiveProcess.on('error', (error) => {
+              clearInterval(progressInterval);
+              console.error('[BitBar RunTest] Failed to start xcodebuild process:', error.message);
+              reject(new Error(`Failed to start xcodebuild: ${error.message}`));
+            });
+          });
+          
+          // Export IPA command
+          const exportArgs = [
+            '-exportArchive',
+            '-archivePath', archivePath,
+            '-exportPath', exportPath,
+            '-exportOptionsPlist', exportOptionsPlist
+          ];
+          
+          console.log('[BitBar RunTest] Starting IPA export...');
+          console.log('[BitBar RunTest] Export command: xcodebuild', exportArgs.join(' '));
+          console.log('[BitBar RunTest] Export may take a few minutes...');
+          
+          // Execute export command with enhanced logging
+          await new Promise<void>((resolve, reject) => {
+            const startTime = Date.now();
+            const exportProcess = spawn('xcodebuild', exportArgs, {
+              cwd: currentDir,
+              stdio: ['ignore', 'pipe', 'pipe']
+            });
+            
+            let stdout = '';
+            let stderr = '';
+            
+            // Log progress every 30 seconds
+            const progressInterval = setInterval(() => {
+              const elapsed = Math.round((Date.now() - startTime) / 1000);
+              console.log(`[BitBar RunTest] Export still in progress... (${elapsed}s elapsed)`);
+            }, 30000);
+            
+            exportProcess.stdout?.on('data', (data) => {
+              const output = data.toString();
+              stdout += output;
+              
+              // Log important stdout messages
+              const lines = output.split('\n').filter((line: string) => line.trim());
+              for (const line of lines) {
+                if (line.includes('error') || line.includes('warning') || line.includes('Exporting') || line.includes('Export succeeded')) {
+                  console.log('[BitBar RunTest] Export stdout:', line.trim());
+                }
+              }
+            });
+            
+            exportProcess.stderr?.on('data', (data) => {
+              const output = data.toString();
+              stderr += output;
+              console.log('[BitBar RunTest] Export stderr:', output.trim());
+            });
+            
+            exportProcess.on('close', (code) => {
+              clearInterval(progressInterval);
+              const elapsed = Math.round((Date.now() - startTime) / 1000);
+              
+              if (code === 0) {
+                console.log(`[BitBar RunTest] Export completed successfully in ${elapsed}s`);
+                console.log('[BitBar RunTest] Verifying export directory exists at:', exportPath);
+                
+                if (fs.existsSync(exportPath)) {
+                  const exportedFiles = fs.readdirSync(exportPath);
+                  console.log('[BitBar RunTest] Files in export directory:', exportedFiles);
+                  resolve();
+                } else {
+                  console.error('[BitBar RunTest] ERROR: Export directory not found');
+                  reject(new Error(`Export directory not found at ${exportPath}`));
+                }
+              } else {
+                console.error(`[BitBar RunTest] Export failed with exit code: ${code}`);
+                console.error('[BitBar RunTest] Full stderr output:', stderr);
+                reject(new Error(`IPA export failed with exit code ${code}: ${stderr.substring(0, 1000)}`));
+              }
+            });
+            
+            exportProcess.on('error', (error) => {
+              clearInterval(progressInterval);
+              console.error('[BitBar RunTest] Failed to start export process:', error.message);
+              reject(new Error(`Failed to start xcodebuild for export: ${error.message}`));
+            });
+          });
+          
+          // Find and rename the exported IPA file
+          console.log('[BitBar RunTest] Looking for exported IPA file...');
+          const exportedFiles = fs.readdirSync(exportPath);
+          console.log('[BitBar RunTest] All files in export directory:', exportedFiles);
+          
+          const ipaFile = exportedFiles.find(file => file.endsWith('.ipa'));
+          
+          if (!ipaFile) {
+            console.error('[BitBar RunTest] ERROR: No IPA file found in export directory');
+            console.error('[BitBar RunTest] Available files:', exportedFiles);
+            throw new Error('No IPA file found in export directory');
+          }
+          
+          console.log('[BitBar RunTest] Found IPA file:', ipaFile);
+          
+          const originalIpaPath = path.join(exportPath, ipaFile);
+          const timestampedIpaName = `${iOSProjectName}_${formattedTimestamp}.ipa`;
+          const finalIpaPath = path.join(exportPath, timestampedIpaName);
+          
+          console.log('[BitBar RunTest] Renaming IPA file...');
+          console.log('[BitBar RunTest] From:', originalIpaPath);
+          console.log('[BitBar RunTest] To:', finalIpaPath);
+          
+          fs.renameSync(originalIpaPath, finalIpaPath);
+          console.log('[BitBar RunTest] IPA file renamed successfully');
+          
+          const stats = fs.statSync(finalIpaPath);
+          console.log('[BitBar RunTest] Final IPA file size:', Math.round(stats.size / 1024 / 1024 * 100) / 100, 'MB');
+          ipaResult = {
+            success: true,
+            ipaPath: finalIpaPath,
+            ipaName: timestampedIpaName,
+            projectName: iOSProjectName,
+            timestamp: formattedTimestamp,
+            fileSize: stats.size
+          };
+          
+          console.log('[BitBar RunTest] Step 2 completed: IPA file built');
+          
+          // Step 3: Upload both files to BitBar
+          console.log('[BitBar RunTest] Step 3: Uploading files to BitBar...');
+          
+          // Upload test package
+          console.log('[BitBar RunTest] Reading test package file...');
+          console.log('[BitBar RunTest] Test package path:', zipPath);
+          console.log('[BitBar RunTest] Test package size:', Math.round(fs.statSync(zipPath).size / 1024), 'KB');
+          
+          const testPackageBuffer = fs.readFileSync(zipPath);
+          const testPackageBase64 = testPackageBuffer.toString('base64');
+          console.log('[BitBar RunTest] Test package converted to base64, length:', testPackageBase64.length);
+          
+          console.log('[BitBar RunTest] Uploading test package to BitBar...');
+          const testPackageUploadResult = await this.uploadFile({
+            filename: zipFilename,
+            fileContent: testPackageBase64,
+            contentType: 'application/zip'
+          });
+          testPackageFileId = testPackageUploadResult.id;
+          console.log('[BitBar RunTest] Test package uploaded successfully, file ID:', testPackageFileId);
+          
+          // Upload IPA file
+          console.log('[BitBar RunTest] Reading IPA file...');
+          console.log('[BitBar RunTest] IPA path:', finalIpaPath);
+          console.log('[BitBar RunTest] IPA size:', Math.round(stats.size / 1024 / 1024 * 100) / 100, 'MB');
+          
+          const ipaBuffer = fs.readFileSync(finalIpaPath);
+          const ipaBase64 = ipaBuffer.toString('base64');
+          console.log('[BitBar RunTest] IPA converted to base64, length:', ipaBase64.length);
+          
+          console.log('[BitBar RunTest] Uploading IPA to BitBar...');
+          const ipaUploadResult = await this.uploadFile({
+            filename: timestampedIpaName,
+            fileContent: ipaBase64,
+            contentType: 'application/octet-stream'
+          });
+          ipaFileId = ipaUploadResult.id;
+          console.log('[BitBar RunTest] IPA uploaded successfully, file ID:', ipaFileId);
+          
+          console.log('[BitBar RunTest] Step 3 completed: Files uploaded to BitBar');
+          console.log('[BitBar RunTest] Test package file ID:', testPackageFileId);
+          console.log('[BitBar RunTest] IPA file ID:', ipaFileId);
+          
+          // Step 4: Start BitBar test with hardcoded device 114152
+          console.log('[BitBar RunTest] Step 4: Starting BitBar test run...');
+          
+          const testRunName = args.testRunName || `${iOSProjectName}_automated_test_${formattedTimestamp}`;
+          
+          // Get iOS framework ID (assuming it's available)
+          const frameworksResponse = await this.listFrameworks();
+          const iosFramework = frameworksResponse.data?.find((f: any) => 
+            f.name?.toLowerCase().includes('ios') || 
+            f.name?.toLowerCase().includes('appium')
+          );
+          
+          if (!iosFramework) {
+            throw new Error('No suitable iOS testing framework found in BitBar');
+          }
+          
+          const testRunArgs = {
+            osType: 'IOS' as const,
+            projectId: args.projectId,
+            files: [
+              { id: ipaFileId!, action: 'INSTALL' as const },
+              { id: testPackageFileId!, action: 'RUN_TEST' as const }
+            ],
+            frameworkId: iosFramework.id,
+            deviceIds: ['114152'], // Hardcoded device ID as requested
+            testRunName: testRunName,
+            scheduler: 'SINGLE' as const,
+            timeout: 3600, // 1 hour timeout
+            videoRecordingEnabled: true
+          };
+          
+          const testRunResult = await this.createTestRun(testRunArgs);
+          
+          console.log('[BitBar RunTest] Step 4 completed: Test run started');
+          console.log('[BitBar RunTest] Test run ID:', testRunResult.id);
+          
+          // Return comprehensive results
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({
+                success: true,
+                workflow: 'complete_ios_test',
+                steps: {
+                  testPackage: {
+                    completed: true,
+                    result: testPackageResult,
+                    fileId: testPackageFileId
+                  },
+                  ipaFile: {
+                    completed: true,
+                    result: ipaResult,
+                    fileId: ipaFileId
+                  },
+                  testRun: {
+                    completed: true,
+                    result: testRunResult,
+                    runId: testRunResult.id,
+                    deviceId: '114152'
+                  }
+                },
+                summary: {
+                  projectName: iOSProjectName,
+                  bundleId: bundleId,
+                  timestamp: formattedTimestamp,
+                  testRunId: testRunResult.id,
+                  testRunName: testRunName,
+                  deviceId: '114152',
+                  frameworkUsed: iosFramework.name
+                },
+                message: `Complete iOS test workflow executed successfully. Test run ${testRunResult.id} started on device 114152.`
+              }, null, 2)
+            }],
+          };
+          
+        } catch (error) {
+          console.error('[BitBar RunTest] Workflow error:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown workflow error';
+          
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({ 
+                error: true, 
+                workflow: 'complete_ios_test',
+                message: errorMessage,
+                completedSteps: {
+                  testPackage: testPackageResult !== null,
+                  ipaFile: ipaResult !== null,
+                  fileUploads: testPackageFileId !== null && ipaFileId !== null,
+                  testRun: false
+                },
+                fileIds: {
+                  testPackage: testPackageFileId,
+                  ipaFile: ipaFileId
+                },
+                timestamp: new Date().toISOString(),
+                suggestions: [
+                  'Ensure you are in an iOS project directory',
+                  'Verify Xcode is installed and configured properly',
+                  'Check that the iOS project builds successfully in Xcode',
+                  'Ensure valid BitBar project ID is provided',
+                  'Verify BitBar API access and permissions'
                 ]
               }, null, 2) 
             }],
