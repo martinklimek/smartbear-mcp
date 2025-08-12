@@ -423,11 +423,29 @@ export class BitBarClient implements Client {
             elementName = selector.replace('accessibility_id:', '');
             locatorCode = `driver.find_element(AppiumBy.ACCESSIBILITY_ID, "${elementName}")`;
           } else if (selector.includes('xpath:')) {
-            const xpathExpression = selector.replace('xpath:', '');
+            const originalXpath = selector.replace('xpath:', '');
             // Extract element name from xpath for variable naming
-            const nameMatch = xpathExpression.match(/@name=['"]([^'"]+)['"]/);
+            const nameMatch = originalXpath.match(/@name=['"]([^'"]+)['"]/);
             elementName = nameMatch ? nameMatch[1] : 'element';
-            locatorCode = `driver.find_element(AppiumBy.XPATH, "${xpathExpression}")`;
+            
+            // Convert to contains approach for better compatibility
+            // Example: xpath:About becomes //*[contains(@name, 'About')]
+            let containsXpath;
+            if (nameMatch) {
+              containsXpath = `//*[contains(@name, '${nameMatch[1]}')]`;
+            } else {
+              // If no @name found, try to extract a text value or use original
+              const textMatch = originalXpath.match(/text\(\)=['"]([^'"]+)['"]/);
+              if (textMatch) {
+                containsXpath = `//*[contains(text(), '${textMatch[1]}')]`;
+                elementName = textMatch[1];
+              } else {
+                // Fallback to original xpath if no pattern matches
+                containsXpath = originalXpath;
+              }
+            }
+            
+            locatorCode = `driver.find_element(AppiumBy.XPATH, "${containsXpath}")`;
           } else {
             // Default to accessibility ID
             elementName = selector || 'element';
