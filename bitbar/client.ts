@@ -2788,10 +2788,10 @@ class BitBarAppiumTest(unittest.TestCase):
               { id: ipaFileId!, action: 'INSTALL' as const },
               { id: testPackageFileId!, action: 'RUN_TEST' as const }
             ],
-            frameworkId: iosFramework.id,
+            frameworkId: "542",
             deviceIds: ['114152'], // Hardcoded device ID as requested
             testRunName: testRunName,
-            scheduler: 'SINGLE' as const,
+            scheduler: 'PARALLEL' as const,
             timeout: 3600, // 1 hour timeout
             videoRecordingEnabled: true
           };
