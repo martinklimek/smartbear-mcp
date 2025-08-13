@@ -2296,7 +2296,7 @@ class BitBarAppiumTest(unittest.TestCase):
 
     // BitBar Complete iOS Test Flow Tool
     server.tool(
-      "bitbar_run_ios_test",
+      "bitbar_replay_session",
       "Complete iOS test workflow that orchestrates the entire testing process: 1) Generate test package from reproduction steps, 2) Build IPA file, 3) Upload both files to BitBar, 4) Start test run on specified device. This tool chains together bitbar_create_ios_test_pkg, bitbar_build_ipa, bitbar_upload_file, and bitbar_create_test_run to provide end-to-end iOS testing automation.",
       {
         reproductionSteps: z.object({
@@ -2321,10 +2321,10 @@ class BitBarAppiumTest(unittest.TestCase):
         let ipaFileId: string | null = null;
         
         try {
-          console.log('[BitBar RunTest] Starting complete iOS test workflow...');
+          console.log('[BitBar ReplaySession] Starting complete iOS test workflow...');
           
           // Step 1: Generate test package using bitbar_create_ios_test_pkg
-          console.log('[BitBar RunTest] Step 1: Creating iOS test package...');
+          console.log('[BitBar ReplaySession] Step 1: Creating iOS test package...');
           
           const testPackageTool = this.registerTools.bind(this);
           // We need to call the bitbar_create_ios_test_pkg functionality directly
@@ -2431,10 +2431,10 @@ class BitBarAppiumTest(unittest.TestCase):
             timestamp: formattedTimestamp
           };
           
-          console.log('[BitBar RunTest] Step 1 completed: Test package created');
+          console.log('[BitBar ReplaySession] Step 1 completed: Test package created');
           
           // Step 2: Build IPA file using bitbar_build_ipa logic
-          console.log('[BitBar RunTest] Step 2: Building IPA file...');
+          console.log('[BitBar ReplaySession] Step 2: Building IPA file...');
           
           const { spawn } = await import('child_process');
           
@@ -2444,24 +2444,24 @@ class BitBarAppiumTest(unittest.TestCase):
           const exportPath = path.join(buildDir, 'Export');
           const exportOptionsPlist = path.join(currentDir, 'ExportOptions.plist');
           
-          console.log('[BitBar RunTest] IPA Build configuration:');
-          console.log('[BitBar RunTest] - Build directory:', buildDir);
-          console.log('[BitBar RunTest] - Archive path:', archivePath);
-          console.log('[BitBar RunTest] - Export path:', exportPath);
-          console.log('[BitBar RunTest] - ExportOptions.plist:', exportOptionsPlist);
+          console.log('[BitBar ReplaySession] IPA Build configuration:');
+          console.log('[BitBar ReplaySession] - Build directory:', buildDir);
+          console.log('[BitBar ReplaySession] - Archive path:', archivePath);
+          console.log('[BitBar ReplaySession] - Export path:', exportPath);
+          console.log('[BitBar ReplaySession] - ExportOptions.plist:', exportOptionsPlist);
           
           // Create build directory
           if (!fs.existsSync(buildDir)) {
-            console.log('[BitBar RunTest] Creating build directory...');
+            console.log('[BitBar ReplaySession] Creating build directory...');
             fs.mkdirSync(buildDir, { recursive: true });
-            console.log('[BitBar RunTest] Build directory created successfully');
+            console.log('[BitBar ReplaySession] Build directory created successfully');
           } else {
-            console.log('[BitBar RunTest] Build directory already exists');
+            console.log('[BitBar ReplaySession] Build directory already exists');
           }
           
           // Create default ExportOptions.plist if needed
           if (!fs.existsSync(exportOptionsPlist)) {
-            console.log('[BitBar RunTest] Creating default ExportOptions.plist...');
+            console.log('[BitBar ReplaySession] Creating default ExportOptions.plist...');
             const defaultExportOptions = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -2479,15 +2479,15 @@ class BitBarAppiumTest(unittest.TestCase):
 </dict>
 </plist>`;
             fs.writeFileSync(exportOptionsPlist, defaultExportOptions);
-            console.log('[BitBar RunTest] ExportOptions.plist created successfully');
+            console.log('[BitBar ReplaySession] ExportOptions.plist created successfully');
           } else {
-            console.log('[BitBar RunTest] Using existing ExportOptions.plist');
+            console.log('[BitBar ReplaySession] Using existing ExportOptions.plist');
           }
           
           // Find Xcode project or workspace
-          console.log('[BitBar RunTest] Searching for Xcode project files...');
+          console.log('[BitBar ReplaySession] Searching for Xcode project files...');
           const items = fs.readdirSync(currentDir);
-          console.log('[BitBar RunTest] Found items in directory:', items.slice(0, 10)); // Show first 10 items to avoid spam
+          console.log('[BitBar ReplaySession] Found items in directory:', items.slice(0, 10)); // Show first 10 items to avoid spam
           
           let projectFile = null;
           let isWorkspace = false;
@@ -2496,25 +2496,25 @@ class BitBarAppiumTest(unittest.TestCase):
             if (item.endsWith('.xcworkspace')) {
               projectFile = item;
               isWorkspace = true;
-              console.log('[BitBar RunTest] Found Xcode workspace:', item);
+              console.log('[BitBar ReplaySession] Found Xcode workspace:', item);
               break;
             } else if (item.endsWith('.xcodeproj')) {
               projectFile = item;
               isWorkspace = false;
-              console.log('[BitBar RunTest] Found Xcode project:', item);
+              console.log('[BitBar ReplaySession] Found Xcode project:', item);
             }
           }
           
           if (!projectFile) {
-            console.error('[BitBar RunTest] ERROR: No Xcode project (.xcodeproj) or workspace (.xcworkspace) found');
+            console.error('[BitBar ReplaySession] ERROR: No Xcode project (.xcodeproj) or workspace (.xcworkspace) found');
             throw new Error('No Xcode project (.xcodeproj) or workspace (.xcworkspace) found');
           }
           
-          console.log(`[BitBar RunTest] Will use ${isWorkspace ? 'workspace' : 'project'}: ${projectFile}`);
+          console.log(`[BitBar ReplaySession] Will use ${isWorkspace ? 'workspace' : 'project'}: ${projectFile}`);
           
           // Auto-detect scheme
           const scheme = projectFile.replace('.xcodeproj', '').replace('.xcworkspace', '');
-          console.log(`[BitBar RunTest] Using scheme: ${scheme}`);
+          console.log(`[BitBar ReplaySession] Using scheme: ${scheme}`);
           
           // Build archive command
           const archiveArgs = [
@@ -2532,9 +2532,9 @@ class BitBarAppiumTest(unittest.TestCase):
             archiveArgs.unshift('-project', projectFile);
           }
           
-          console.log('[BitBar RunTest] Starting archive build...');
-          console.log('[BitBar RunTest] Archive command: xcodebuild', archiveArgs.join(' '));
-          console.log('[BitBar RunTest] This may take several minutes...');
+          console.log('[BitBar ReplaySession] Starting archive build...');
+          console.log('[BitBar ReplaySession] Archive command: xcodebuild', archiveArgs.join(' '));
+          console.log('[BitBar ReplaySession] This may take several minutes...');
           
           // Execute archive command with enhanced logging
           await new Promise<void>((resolve, reject) => {
@@ -2551,7 +2551,7 @@ class BitBarAppiumTest(unittest.TestCase):
             // Log progress every 30 seconds
             const progressInterval = setInterval(() => {
               const elapsed = Math.round((Date.now() - startTime) / 1000);
-              console.log(`[BitBar RunTest] Archive still in progress... (${elapsed}s elapsed)`);
+              console.log(`[BitBar ReplaySession] Archive still in progress... (${elapsed}s elapsed)`);
             }, 30000);
             
             archiveProcess.stdout?.on('data', (data) => {
@@ -2562,7 +2562,7 @@ class BitBarAppiumTest(unittest.TestCase):
               const lines = output.split('\n').filter((line: string) => line.trim());
               for (const line of lines) {
                 if (line.includes('error') || line.includes('warning') || line.includes('Building') || line.includes('Archiving')) {
-                  console.log('[BitBar RunTest] Archive stdout:', line.trim());
+                  console.log('[BitBar ReplaySession] Archive stdout:', line.trim());
                 }
               }
             });
@@ -2570,7 +2570,7 @@ class BitBarAppiumTest(unittest.TestCase):
             archiveProcess.stderr?.on('data', (data) => {
               const output = data.toString();
               stderr += output;
-              console.log('[BitBar RunTest] Archive stderr:', output.trim());
+              console.log('[BitBar ReplaySession] Archive stderr:', output.trim());
             });
             
             archiveProcess.on('close', (code) => {
@@ -2578,21 +2578,21 @@ class BitBarAppiumTest(unittest.TestCase):
               const elapsed = Math.round((Date.now() - startTime) / 1000);
               
               if (code === 0) {
-                console.log(`[BitBar RunTest] Archive completed successfully in ${elapsed}s`);
-                console.log('[BitBar RunTest] Verifying archive exists at:', archivePath);
+                console.log(`[BitBar ReplaySession] Archive completed successfully in ${elapsed}s`);
+                console.log('[BitBar ReplaySession] Verifying archive exists at:', archivePath);
                 
                 if (fs.existsSync(archivePath)) {
-                  console.log('[BitBar RunTest] Archive file verified successfully');
+                  console.log('[BitBar ReplaySession] Archive file verified successfully');
                   resolve();
                 } else {
-                  console.error('[BitBar RunTest] ERROR: Archive file not found at expected path');
+                  console.error('[BitBar ReplaySession] ERROR: Archive file not found at expected path');
                   reject(new Error(`Archive file not found at ${archivePath}`));
                 }
               } else {
-                console.error(`[BitBar RunTest] Archive build failed with exit code: ${code}`);
-                console.error('[BitBar RunTest] Full stderr output:', stderr);
+                console.error(`[BitBar ReplaySession] Archive build failed with exit code: ${code}`);
+                console.error('[BitBar ReplaySession] Full stderr output:', stderr);
                 if (stderr.length > 1000) {
-                  console.error('[BitBar RunTest] Stderr truncated, full output available in logs');
+                  console.error('[BitBar ReplaySession] Stderr truncated, full output available in logs');
                 }
                 reject(new Error(`Archive build failed with exit code ${code}: ${stderr.substring(0, 1000)}`));
               }
@@ -2600,7 +2600,7 @@ class BitBarAppiumTest(unittest.TestCase):
             
             archiveProcess.on('error', (error) => {
               clearInterval(progressInterval);
-              console.error('[BitBar RunTest] Failed to start xcodebuild process:', error.message);
+              console.error('[BitBar ReplaySession] Failed to start xcodebuild process:', error.message);
               reject(new Error(`Failed to start xcodebuild: ${error.message}`));
             });
           });
@@ -2613,9 +2613,9 @@ class BitBarAppiumTest(unittest.TestCase):
             '-exportOptionsPlist', exportOptionsPlist
           ];
           
-          console.log('[BitBar RunTest] Starting IPA export...');
-          console.log('[BitBar RunTest] Export command: xcodebuild', exportArgs.join(' '));
-          console.log('[BitBar RunTest] Export may take a few minutes...');
+          console.log('[BitBar ReplaySession] Starting IPA export...');
+          console.log('[BitBar ReplaySession] Export command: xcodebuild', exportArgs.join(' '));
+          console.log('[BitBar ReplaySession] Export may take a few minutes...');
           
           // Execute export command with enhanced logging
           await new Promise<void>((resolve, reject) => {
@@ -2631,7 +2631,7 @@ class BitBarAppiumTest(unittest.TestCase):
             // Log progress every 30 seconds
             const progressInterval = setInterval(() => {
               const elapsed = Math.round((Date.now() - startTime) / 1000);
-              console.log(`[BitBar RunTest] Export still in progress... (${elapsed}s elapsed)`);
+              console.log(`[BitBar ReplaySession] Export still in progress... (${elapsed}s elapsed)`);
             }, 30000);
             
             exportProcess.stdout?.on('data', (data) => {
@@ -2642,7 +2642,7 @@ class BitBarAppiumTest(unittest.TestCase):
               const lines = output.split('\n').filter((line: string) => line.trim());
               for (const line of lines) {
                 if (line.includes('error') || line.includes('warning') || line.includes('Exporting') || line.includes('Export succeeded')) {
-                  console.log('[BitBar RunTest] Export stdout:', line.trim());
+                  console.log('[BitBar ReplaySession] Export stdout:', line.trim());
                 }
               }
             });
@@ -2650,7 +2650,7 @@ class BitBarAppiumTest(unittest.TestCase):
             exportProcess.stderr?.on('data', (data) => {
               const output = data.toString();
               stderr += output;
-              console.log('[BitBar RunTest] Export stderr:', output.trim());
+              console.log('[BitBar ReplaySession] Export stderr:', output.trim());
             });
             
             exportProcess.on('close', (code) => {
@@ -2658,59 +2658,59 @@ class BitBarAppiumTest(unittest.TestCase):
               const elapsed = Math.round((Date.now() - startTime) / 1000);
               
               if (code === 0) {
-                console.log(`[BitBar RunTest] Export completed successfully in ${elapsed}s`);
-                console.log('[BitBar RunTest] Verifying export directory exists at:', exportPath);
+                console.log(`[BitBar ReplaySession] Export completed successfully in ${elapsed}s`);
+                console.log('[BitBar ReplaySession] Verifying export directory exists at:', exportPath);
                 
                 if (fs.existsSync(exportPath)) {
                   const exportedFiles = fs.readdirSync(exportPath);
-                  console.log('[BitBar RunTest] Files in export directory:', exportedFiles);
+                  console.log('[BitBar ReplaySession] Files in export directory:', exportedFiles);
                   resolve();
                 } else {
-                  console.error('[BitBar RunTest] ERROR: Export directory not found');
+                  console.error('[BitBar ReplaySession] ERROR: Export directory not found');
                   reject(new Error(`Export directory not found at ${exportPath}`));
                 }
               } else {
-                console.error(`[BitBar RunTest] Export failed with exit code: ${code}`);
-                console.error('[BitBar RunTest] Full stderr output:', stderr);
+                console.error(`[BitBar ReplaySession] Export failed with exit code: ${code}`);
+                console.error('[BitBar ReplaySession] Full stderr output:', stderr);
                 reject(new Error(`IPA export failed with exit code ${code}: ${stderr.substring(0, 1000)}`));
               }
             });
             
             exportProcess.on('error', (error) => {
               clearInterval(progressInterval);
-              console.error('[BitBar RunTest] Failed to start export process:', error.message);
+              console.error('[BitBar ReplaySession] Failed to start export process:', error.message);
               reject(new Error(`Failed to start xcodebuild for export: ${error.message}`));
             });
           });
           
           // Find and rename the exported IPA file
-          console.log('[BitBar RunTest] Looking for exported IPA file...');
+          console.log('[BitBar ReplaySession] Looking for exported IPA file...');
           const exportedFiles = fs.readdirSync(exportPath);
-          console.log('[BitBar RunTest] All files in export directory:', exportedFiles);
+          console.log('[BitBar ReplaySession] All files in export directory:', exportedFiles);
           
           const ipaFile = exportedFiles.find(file => file.endsWith('.ipa'));
           
           if (!ipaFile) {
-            console.error('[BitBar RunTest] ERROR: No IPA file found in export directory');
-            console.error('[BitBar RunTest] Available files:', exportedFiles);
+            console.error('[BitBar ReplaySession] ERROR: No IPA file found in export directory');
+            console.error('[BitBar ReplaySession] Available files:', exportedFiles);
             throw new Error('No IPA file found in export directory');
           }
           
-          console.log('[BitBar RunTest] Found IPA file:', ipaFile);
+          console.log('[BitBar ReplaySession] Found IPA file:', ipaFile);
           
           const originalIpaPath = path.join(exportPath, ipaFile);
           const timestampedIpaName = `${iOSProjectName}_${formattedTimestamp}.ipa`;
           const finalIpaPath = path.join(exportPath, timestampedIpaName);
           
-          console.log('[BitBar RunTest] Renaming IPA file...');
-          console.log('[BitBar RunTest] From:', originalIpaPath);
-          console.log('[BitBar RunTest] To:', finalIpaPath);
+          console.log('[BitBar ReplaySession] Renaming IPA file...');
+          console.log('[BitBar ReplaySession] From:', originalIpaPath);
+          console.log('[BitBar ReplaySession] To:', finalIpaPath);
           
           fs.renameSync(originalIpaPath, finalIpaPath);
-          console.log('[BitBar RunTest] IPA file renamed successfully');
+          console.log('[BitBar ReplaySession] IPA file renamed successfully');
           
           const stats = fs.statSync(finalIpaPath);
-          console.log('[BitBar RunTest] Final IPA file size:', Math.round(stats.size / 1024 / 1024 * 100) / 100, 'MB');
+          console.log('[BitBar ReplaySession] Final IPA file size:', Math.round(stats.size / 1024 / 1024 * 100) / 100, 'MB');
           ipaResult = {
             success: true,
             ipaPath: finalIpaPath,
@@ -2720,53 +2720,53 @@ class BitBarAppiumTest(unittest.TestCase):
             fileSize: stats.size
           };
           
-          console.log('[BitBar RunTest] Step 2 completed: IPA file built');
+          console.log('[BitBar ReplaySession] Step 2 completed: IPA file built');
           
           // Step 3: Upload both files to BitBar
-          console.log('[BitBar RunTest] Step 3: Uploading files to BitBar...');
+          console.log('[BitBar ReplaySession] Step 3: Uploading files to BitBar...');
           
           // Upload test package
-          console.log('[BitBar RunTest] Reading test package file...');
-          console.log('[BitBar RunTest] Test package path:', zipPath);
-          console.log('[BitBar RunTest] Test package size:', Math.round(fs.statSync(zipPath).size / 1024), 'KB');
+          console.log('[BitBar ReplaySession] Reading test package file...');
+          console.log('[BitBar ReplaySession] Test package path:', zipPath);
+          console.log('[BitBar ReplaySession] Test package size:', Math.round(fs.statSync(zipPath).size / 1024), 'KB');
           
           const testPackageBuffer = fs.readFileSync(zipPath);
           const testPackageBase64 = testPackageBuffer.toString('base64');
-          console.log('[BitBar RunTest] Test package converted to base64, length:', testPackageBase64.length);
+          console.log('[BitBar ReplaySession] Test package converted to base64, length:', testPackageBase64.length);
           
-          console.log('[BitBar RunTest] Uploading test package to BitBar...');
+          console.log('[BitBar ReplaySession] Uploading test package to BitBar...');
           const testPackageUploadResult = await this.uploadFile({
             filename: zipFilename,
             fileContent: testPackageBase64,
             contentType: 'application/zip'
           });
           testPackageFileId = testPackageUploadResult.id;
-          console.log('[BitBar RunTest] Test package uploaded successfully, file ID:', testPackageFileId);
+          console.log('[BitBar ReplaySession] Test package uploaded successfully, file ID:', testPackageFileId);
           
           // Upload IPA file
-          console.log('[BitBar RunTest] Reading IPA file...');
-          console.log('[BitBar RunTest] IPA path:', finalIpaPath);
-          console.log('[BitBar RunTest] IPA size:', Math.round(stats.size / 1024 / 1024 * 100) / 100, 'MB');
+          console.log('[BitBar ReplaySession] Reading IPA file...');
+          console.log('[BitBar ReplaySession] IPA path:', finalIpaPath);
+          console.log('[BitBar ReplaySession] IPA size:', Math.round(stats.size / 1024 / 1024 * 100) / 100, 'MB');
           
           const ipaBuffer = fs.readFileSync(finalIpaPath);
           const ipaBase64 = ipaBuffer.toString('base64');
-          console.log('[BitBar RunTest] IPA converted to base64, length:', ipaBase64.length);
+          console.log('[BitBar ReplaySession] IPA converted to base64, length:', ipaBase64.length);
           
-          console.log('[BitBar RunTest] Uploading IPA to BitBar...');
+          console.log('[BitBar ReplaySession] Uploading IPA to BitBar...');
           const ipaUploadResult = await this.uploadFile({
             filename: timestampedIpaName,
             fileContent: ipaBase64,
             contentType: 'application/octet-stream'
           });
           ipaFileId = ipaUploadResult.id;
-          console.log('[BitBar RunTest] IPA uploaded successfully, file ID:', ipaFileId);
+          console.log('[BitBar ReplaySession] IPA uploaded successfully, file ID:', ipaFileId);
           
-          console.log('[BitBar RunTest] Step 3 completed: Files uploaded to BitBar');
-          console.log('[BitBar RunTest] Test package file ID:', testPackageFileId);
-          console.log('[BitBar RunTest] IPA file ID:', ipaFileId);
+          console.log('[BitBar ReplaySession] Step 3 completed: Files uploaded to BitBar');
+          console.log('[BitBar ReplaySession] Test package file ID:', testPackageFileId);
+          console.log('[BitBar ReplaySession] IPA file ID:', ipaFileId);
           
           // Step 4: Start BitBar test with hardcoded device 114152
-          console.log('[BitBar RunTest] Step 4: Starting BitBar test run...');
+          console.log('[BitBar ReplaySession] Step 4: Starting BitBar test run...');
           
           const testRunName = args.testRunName || `${iOSProjectName}_automated_test_${formattedTimestamp}`;
           
@@ -2788,18 +2788,18 @@ class BitBarAppiumTest(unittest.TestCase):
               { id: ipaFileId!, action: 'INSTALL' as const },
               { id: testPackageFileId!, action: 'RUN_TEST' as const }
             ],
-            frameworkId: iosFramework.id,
+            frameworkId: "542",
             deviceIds: ['114152'], // Hardcoded device ID as requested
             testRunName: testRunName,
-            scheduler: 'SINGLE' as const,
+            scheduler: 'PARALLEL' as const,
             timeout: 3600, // 1 hour timeout
             videoRecordingEnabled: true
           };
           
           const testRunResult = await this.createTestRun(testRunArgs);
           
-          console.log('[BitBar RunTest] Step 4 completed: Test run started');
-          console.log('[BitBar RunTest] Test run ID:', testRunResult.id);
+          console.log('[BitBar ReplaySession] Step 4 completed: Test run started');
+          console.log('[BitBar ReplaySession] Test run ID:', testRunResult.id);
           
           // Return comprehensive results
           return {
@@ -2841,7 +2841,7 @@ class BitBarAppiumTest(unittest.TestCase):
           };
           
         } catch (error) {
-          console.error('[BitBar RunTest] Workflow error:', error);
+          console.error('[BitBar ReplaySession] Workflow error:', error);
           const errorMessage = error instanceof Error ? error.message : 'Unknown workflow error';
           
           return {
