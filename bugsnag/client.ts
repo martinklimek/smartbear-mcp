@@ -2,7 +2,7 @@ import NodeCache from "node-cache";
 import { z } from "zod";
 
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from "../common/info.js";
-import { Client, GetInputFunction, RegisterResourceFunction, RegisterToolsFunction } from "../common/types.js";
+import { Client, GetInputFunction, RegisterResourceFunction, RegisterToolsFunction, RegisterPromptsFunction } from "../common/types.js";
 import { CurrentUserAPI, ErrorAPI, Configuration } from "./client/index.js";
 import { Organization, Project } from "./client/api/CurrentUser.js";
 import { EventField, ProjectAPI } from "./client/api/Project.js";
@@ -47,6 +47,58 @@ export interface ErrorArgs extends ProjectArgs {
   errorId: string;
 }
 export class BugsnagClient implements Client {
+  registerPrompts(register: RegisterPromptsFunction): void {
+    register(
+      "error-repro-details",
+      "Generate device requirements, exact reproduction steps and Appium test code from a Bugsnag error URL",
+      {
+        bugsnagUrl: z.string().describe("Bugsnag error URL (e.g., https://app.bugsnag.com/my-org/my-project/errors/6891bb2ba9cb01960d80ddaa)")
+      },
+      async (args: any) => {
+        try {
+          if (!args.bugsnagUrl) {
+            throw new Error("bugsnagUrl argument is required");
+          }
+          // Parse the Bugsnag URL to extract error details
+          const url = new URL(args.bugsnagUrl);
+          // Validate this is a Bugsnag URL
+          if (!url.hostname.includes('bugsnag.com')) {
+            throw new Error("Invalid Bugsnag URL");
+          }
+          // Extract error ID and project slug from the URL path
+          // URL format: https://app.bugsnag.com/my-org/my-project/errors/6891bb2ba9cb01960d80ddaa
+          const pathParts = url.pathname.split('/');
+          if (pathParts.length < 5 || pathParts[3] !== 'errors') {
+            throw new Error("Invalid Bugsnag error URL format");
+          }
+          const projectSlug = pathParts[2];
+          const errorId = pathParts[4];
+          if (!projectSlug || !errorId) {
+            throw new Error("Project slug or error ID missing in URL");
+          }
+          // Get the project id from list of projects
+          const projects = await this.getProjects();
+          const project = projects.find((p: any) => p.slug === projectSlug);
+          if (!project) {
+            throw new Error("Project not found for slug: " + projectSlug);
+          }
+          // Get the error details and latest event
+          const errorDetails = (await this.errorsApi.viewErrorOnProject(project.id, errorId)).body;
+          if (!errorDetails) {
+            throw new Error("Error not found for ID: " + errorId);
+          }
+          const latestEvent = (await this.errorsApi.viewLatestEventOnError(errorId)).body;
+          return {
+            content: [{ type: "text", text: JSON.stringify({ errorDetails, latestEvent }) }]
+          };
+        } catch (error: any) {
+          return {
+            content: [{ type: "text", text: `Error: ${error.message}` }]
+          };
+        }
+      }
+    );
+  }
   private currentUserApi: CurrentUserAPI;
   private errorsApi: ErrorAPI;
   private cache: NodeCache;
