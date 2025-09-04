@@ -34,6 +34,13 @@ export type RegisterResourceFunction = (
     cb: ReadResourceTemplateCallback
 ) => RegisteredResourceTemplate;
 
+export type RegisterPromptsFunction = (
+    name: string,
+    description: string,
+    inputSchema: any,
+    cb: (args: any) => Promise<any>
+) => any;
+
 export type GetInputFunction = (
     params: ElicitRequest["params"],
     options?: RequestOptions
@@ -53,4 +60,5 @@ export interface Client {
     prefix: string;
     registerTools(register: RegisterToolsFunction, getInput: GetInputFunction): void;
     registerResources?(register: RegisterResourceFunction): void;
+    registerPrompts?(register: RegisterPromptsFunction): void;
 }

@@ -63,6 +63,24 @@ export class SmartBearMcpServer extends McpServer {
                     });
             });
         }
+        if (client.registerPrompts) {
+            client.registerPrompts((name, description, inputSchema, cb) => {
+                const promptName = `${client.prefix}_${name.replace(/\s+/g, "_").toLowerCase()}`;
+                return super.prompt(
+                    promptName,
+                    description,
+                    inputSchema,
+                    async (args: any) => {
+                        try {
+                            return await cb(args);
+                        } catch (e) {
+                            Bugsnag.notify(e as unknown as Error);
+                            throw e;
+                        }
+                    }
+                );
+            });
+        }
     }
     
     private getAnnotations(toolTitle: string, params: ToolParams): any {
