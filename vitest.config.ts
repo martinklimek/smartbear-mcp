@@ -19,9 +19,10 @@ export default defineConfig({
         'bugsnag/client/configuration.ts',
         // Main entry point (tested via integration)
         'index.ts',
-        // Other client implementations (not currently tested)
-        'api-hub/client.ts',
-        'reflect/client.ts',
+  // Other client implementations (not currently tested)
+  'api-hub/client.ts',
+  'reflect/client.ts',
+  'bitbar/client.ts',
         // Utility modules
         'common/bugsnag.ts',
         'common/types.ts'

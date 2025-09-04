@@ -1,14 +1,15 @@
 {
   "name": "@smartbear/mcp",
   "version": "0.4.0",
-  "description": "MCP server for interacting SmartBear Products",
+  "description": "MCP server for interacting SmartBear Products including BitBar, Bugsnag, Reflect, API Hub, and PactFlow.",
   "keywords": [
     "smartbear",
     "mcp",
     "bugsnag",
     "reflect",
     "api-hub",
-    "pactflow"
+    "pactflow",
+    "bitbar"
   ],
   "homepage": "https://developer.smartbear.com/smartbear-mcp",
   "repository": {

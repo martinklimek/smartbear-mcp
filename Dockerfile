@@ -6,6 +6,7 @@ COPY reflect /app/reflect
 COPY bugsnag /app/bugsnag
 COPY api-hub /app/api-hub
 COPY pactflow /app/pactflow
+COPY bitbar /app/bitbar
 COPY index.ts /app/
 COPY package.json package-lock.json tsconfig.json /app/
 
@@ -18,6 +19,7 @@ RUN --mount=type=cache,target=/root/.npm-production npm ci --ignore-scripts --om
 FROM node:22-alpine AS release
 
 COPY --from=builder /app/dist /app/dist
+COPY --from=builder /app/bitbar /app/bitbar
 COPY --from=builder /app/package.json /app/package.json
 COPY --from=builder /app/package-lock.json /app/package-lock.json
 
