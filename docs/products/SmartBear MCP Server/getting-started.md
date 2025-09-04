@@ -6,10 +6,9 @@ This guide is to help you get up and running with our MCP server.
 
 Before setting up and using the SmartBear MCP Server, ensure you have: 
 
--   An active account across our relevant hubs (e.g. [API Hub](https://try.platform.smartbear.com/?product=ApiHub), [Test Hub](https://app.reflect.run/registration), and/or [Insight Hub](https://app.bugsnag.com/user/new)).
+-   An active account across our relevant hubs (e.g. [API Hub](https://try.platform.smartbear.com/?product=ApiHub), [Test Hub](https://app.reflect.run/registration), and/or [BugSnag](https://app.bugsnag.com/user/new)) with valid API credentials.
 -   Node.js 20 or later installed on your development machine
 -   A compatible MCP client (Claude Desktop, Cursor, etc.)
--   Valid API credentials for the relevant hubs.
 
 ### Installing the Server
 
@@ -37,25 +36,23 @@ npm install @smartbear/mcp
 
 ### Authentication Setup
 
-The SmartBear MCP Server supports multiple SmartBear Hubs, each requiring its own authentication token. You only need to configure tokens for the products you plan to use:
+The SmartBear MCP Server supports multiple SmartBear Hubs, each requiring its own authentication token.
 
-For API Hub access:
+- **API Hub - Portal**
 
-1.  Log in to your API Hub dashboard
-2.  Navigate to Profile → API Key
-3.  Click the "Copy API Key" button
+  Copy the API key from the API Hub dashboard at [`app.swaggerhub.com`](https://app.swaggerhub.com/settings/apiKey).
 
-For Test Hub (Reflect) access:
+- **API Hub - Contract Testing (PactFlow)**
 
-1.  Log in to your Test Hub (Reflect) dashboard
-2.  Navigate to Settings → Account Information
-3.  Scroll to the "API Access" section
+  Copy the relevant API tokens from [`app.pactflow.io`](https://app.pactflow.io/settings/api-tokens). You will also need to note the tenant URL for your organization (e.g., `{tenant}.pactflow.io`). The MCP server also supports the open source Pact Broker, in which case you will need a username and password instead of a token.
 
-For Insight Hub access:
+- **Test Hub (Reflect)**
 
-1.  Log in to your Insight Hub dashboard
-2.  Navigate to Settings → My account/Personal auth tokens
-3.  Generate a new token
+  Generate an API key from your dashboard at [`app.reflect.run`](https://app.reflect.run/settings/account).
+
+- **BugSnag**
+
+  Generate a new Token from the BugSnag dashboard at [`app.bugsnag.com`](https://app.bugsnag.com/settings/smartbear-software/my-account/auth-tokens).
 
 > 🔐 Store your tokens securely. They provide access to sensitive data and should be treated like passwords. You can use any combination of the supported products - tokens for unused products can be omitted.
 
@@ -64,25 +61,32 @@ For Insight Hub access:
 The following environment variables based on which SmartBear hubs you want to access:
 
 ```
-# Required for Insight Hub tools
-export INSIGHT_HUB_AUTH_TOKEN=your-insight-hub-auth-token
+# Required for BugSnag tools
+export BUGSNAG_AUTH_TOKEN=your-bugsnag-auth-token
 
-#(Recommended when using Insight Hub Tools)
-# The API key for the Insight Hub project you wish to interact with. Use this to scope all operations to a single project.
-INSIGHT_HUB_PROJECT_API_KEY:=your-insight-hub-project-api-key
+#(Recommended when using BugSnag Tools)
+# The API key for the BugSnag project you wish to interact with. Use this to scope all operations to a single project.
+export BUGSNAG_PROJECT_API_KEY=your-bugsnag-project-api-key
 
 # Required for Reflect tools
 export REFLECT_API_TOKEN=your-reflect-api-token
 
-# Required for API Hub tools
+# Required for API Hub - Portal tools
 export API_HUB_API_KEY=your-api-hub-api-key
 
+# Required for API Hub - Contract Testing (PactFlow) tools
+export PACT_BROKER_BASE_URL=https://your-tenant.pactflow.io
+export PACT_BROKER_TOKEN=your-pactflow-api-token
+# If using the open source Pact broker, replace the token with:
+export PACT_BROKER_USERNAME=your-username
+export PACT_BROKER_PASSWORD=your-password
+
 # Optional: Enable error reporting for the MCP server itself
-export MCP_SERVER_INSIGHT_HUB_API_KEY=your-monitoring-api-key
+export MCP_SERVER_BUGSNAG_API_KEY=your-monitoring-api-key
 
 ```
 
-> ⚠️ The `MCP_SERVER_INSIGHT_HUB_API_KEY` is used for monitoring the MCP server itself and should be different from your main application's API key.
+> ⚠️ The `MCP_SERVER_BUGSNAG_API_KEY` is used for monitoring the MCP server itself and should be different from your main application's API key.
 
 ## MCP Host Configuration
 
@@ -103,24 +107,28 @@ Create or edit `.vscode/mcp.json` in your workspace:
       	"@smartbear/mcp@latest"
       	],
       "env": {
-        "INSIGHT_HUB_AUTH_TOKEN": "${input:insight_hub_auth_token}",
-        "INSIGHT_HUB_PROJECT_API_KEY": "${input:insight_hub_project_api_key}",
+        "BUGSNAG_AUTH_TOKEN": "${input:bugsnag_auth_token}",
+        "BUGSNAG_PROJECT_API_KEY": "${input:bugsnag_project_api_key}",
         "REFLECT_API_TOKEN": "${input:reflect_api_token}",
-        "API_HUB_API_KEY": "${input:api_hub_api_key}"
+        "API_HUB_API_KEY": "${input:api_hub_api_key}",
+        "PACT_BROKER_BASE_URL": "${input:pact_broker_base_url}",
+        "PACT_BROKER_TOKEN": "${input:pact_broker_token}",
+        // "PACT_BROKER_USERNAME": "${input:pact_broker_username}",
+        // "PACT_BROKER_PASSWORD": "${input:pact_broker_password}",
       }
     }
   },
   "inputs": [
     {
-      "id": "insight_hub_auth_token",
+      "id": "bugsnag_auth_token",
       "type": "promptString",
-      "description": "Insight Hub Auth Token",
+      "description": "BugSnag Auth Token",
       "password": true
     },
     {
-      "id": "insight_hub_project_api_key",
+      "id": "bugsnag_project_api_key",
       "type": "promptString",
-      "description": "Insight Hub Project API Key - for single project interactions",
+      "description": "BugSnag Project API Key - for single project interactions",
       "password": false
     },
     {
@@ -133,6 +141,30 @@ Create or edit `.vscode/mcp.json` in your workspace:
       "id": "api_hub_api_key",
       "type": "promptString",
       "description": "API Hub API Key",
+      "password": true
+    },
+    {
+      "id": "pact_broker_base_url",
+      "type": "promptString",
+      "description": "Pact Broker Base URL (e.g. https://your-tenant.pactflow.io)",
+      "password": false
+    },
+    {
+      "id": "pact_broker_token",
+      "type": "promptString",
+      "description": "Pact Broker Token (or leave blank if using username/password)",
+      "password": true
+    },
+    {
+      "id": "pact_broker_username",
+      "type": "promptString",
+      "description": "Pact Broker Username (if using username/password auth)",
+      "password": false
+    },
+    {
+      "id": "pact_broker_password",
+      "type": "promptString",
+      "description": "Pact Broker Password (if using username/password auth)",
       "password": true
     }
   ]
@@ -154,10 +186,15 @@ Add to your `mcp.json` configuration:
       	"@smartbear/mcp@latest"
       	],
       "env": {
-        "INSIGHT_HUB_AUTH_TOKEN": "your-insight-hub-auth-token",
-        "INSIGHT_HUB_PROJECT_API_KEY": "your-insight-hub-project-api-key",
+        "BUGSNAG_AUTH_TOKEN": "your-bugsnag-auth-token",
+        "BUGSNAG_PROJECT_API_KEY": "your-bugsnag-project-api-key",
         "REFLECT_API_TOKEN": "your-reflect-api-token",
-        "API_HUB_API_KEY": "your-api-hub-api-key"
+        "API_HUB_API_KEY": "your-api-hub-api-key",
+        "PACT_BROKER_BASE_URL": "https://your-tenant.pactflow.io",
+        "PACT_BROKER_TOKEN": "your-pact-broker-token",
+        // If using the open source Pact broker, replace the token with:
+        // "PACT_BROKER_USERNAME": "your-username",
+        // "PACT_BROKER_PASSWORD": "your-password",
       }
     }
   }
@@ -179,10 +216,15 @@ Edit your `claude_desktop_config.json` file:
       	"@smartbear/mcp@latest"
       	],
       "env": {
-        "INSIGHT_HUB_AUTH_TOKEN": "your-insight-hub-auth-token",
-        "INSIGHT_HUB_PROJECT_API_KEY": "your-insight-hub-project-api-key",
+        "BUGSNAG_AUTH_TOKEN": "your-bugsnag-auth-token",
+        "BUGSNAG_PROJECT_API_KEY": "your-bugsnag-project-api-key",
         "REFLECT_API_TOKEN": "your-reflect-api-token",
-        "API_HUB_API_KEY": "your-api-hub-api-key"
+        "API_HUB_API_KEY": "your-api-hub-api-key",
+        "PACT_BROKER_BASE_URL": "https://your-tenant.pactflow.io",
+        "PACT_BROKER_TOKEN": "your-pact-broker-token",
+        // If using the open source Pact broker, replace the token with:
+        // "PACT_BROKER_USERNAME": "your-username",
+        // "PACT_BROKER_PASSWORD": "your-password",
       }
     }
   }
@@ -209,11 +251,16 @@ claude mcp add --transport stdio smartbear npx mcp
 Then set the required environment variables:
 
 ```
-export INSIGHT_HUB_AUTH_TOKEN=your-insight-hub-auth-token
-export INSIGHT_HUB_PROJECT_API_KEY=your-insight-hub-project-api-key
+export BUGSNAG_AUTH_TOKEN=your-bugsnag-auth-token
+export BUGSNAG_PROJECT_API_KEY=your-bugsnag-project-api-key
 export REFLECT_API_TOKEN=your-reflect-api-token
 export API_HUB_API_KEY=your-api-hub-api-key
 
+export PACT_BROKER_BASE_URL=https://your-tenant.pactflow.io
+export PACT_BROKER_TOKEN=your-pact-broker-token
+# If using the open source Pact broker, replace the token with:
+# export PACT_BROKER_USERNAME=your-username
+# export PACT_BROKER_PASSWORD=your-password
 ```
 
 Launch Claude Code with:
@@ -259,24 +306,29 @@ To run the built server locally in VS Code, add the following configuration to 
       "command": "node",
       "args": ["<PATH_TO_SMARTBEAR_MCP>/dist/index.js"],
       "env": {
-        "INSIGHT_HUB_AUTH_TOKEN": "${input:insight_hub_auth_token}",
-		"INSIGHT_HUB_PROJECT_API_KEY": "${input:insight_hub_project_api_key}",
+        "BUGSNAG_AUTH_TOKEN": "${input:bugsnag_auth_token}",
+        "BUGSNAG_PROJECT_API_KEY": "${input:bugsnag_project_api_key}",
         "REFLECT_API_TOKEN": "${input:reflect_api_token}",
-        "API_HUB_API_KEY": "${input:api_hub_api_key}"
+        "API_HUB_API_KEY": "${input:api_hub_api_key}",
+        "PACT_BROKER_BASE_URL": "${input:pact_broker_base_url}",
+        "PACT_BROKER_TOKEN": "${input:pact_broker_token}",
+        // If using the open source Pact broker, replace the token with:
+        // "PACT_BROKER_USERNAME": "${input:pact_broker_username}",
+        // "PACT_BROKER_PASSWORD": "${input:pact_broker_password}",
       }
     }
   },
   "inputs": [
       {
-         "id": "insight_hub_auth_token",
+         "id": "bugsnag_auth_token",
          "type": "promptString",
-         "description": "Insight Hub Auth Token",
+         "description": "BugSnag Auth Token",
          "password": true
       },
       {
-         "id": "insight_hub_project_api_key",
+         "id": "bugsnag_project_api_key",
          "type": "promptString",
-         "description": "Insight Hub Project API Key - for single project interactions",
+         "description": "BugSnag Project API Key - for single project interactions",
          "password": false
       },
       {
@@ -290,6 +342,30 @@ To run the built server locally in VS Code, add the following configuration to 
          "type": "promptString",
          "description": "API Hub API Key",
          "password": true
+      },
+      {
+         "id": "pact_broker_base_url",
+         "type": "promptString",
+         "description": "Pact Broker Base URL (e.g. https://your-tenant.pactflow.io)",
+         "password": false
+      },
+      {
+         "id": "pact_broker_token",
+         "type": "promptString",
+         "description": "Pact Broker Token (or leave blank if using username/password)",
+         "password": true
+      },
+      {
+         "id": "pact_broker_username",
+         "type": "promptString",
+         "description": "Pact Broker Username (if using username/password auth)",
+         "password": false
+      },
+      {
+         "id": "pact_broker_password",
+         "type": "promptString",
+         "description": "Pact Broker Password (if using username/password auth)",
+         "password": true
       }
   ]
 }
@@ -301,10 +377,12 @@ To run the built server locally in VS Code, add the following configuration to 
 To test the MCP server locally before integrating with your preferred host, you can use the MCP Inspector:
 
 ```
-INSIGHT_HUB_AUTH_TOKEN=your_token\
-INSIGHT_HUB_PROJECT_API_KEY=your_project_api_key\
-REFLECT_API_TOKEN=your_reflect_token\
-API_HUB_API_KEY=your_api_hub_key\
+BUGSNAG_AUTH_TOKEN=your_token \
+BUGSNAG_PROJECT_API_KEY=your_project_api_key \
+REFLECT_API_TOKEN=your_reflect_token \
+API_HUB_API_KEY=your_api_hub_key \
+PACT_BROKER_BASE_URL=https://your-tenant.pactflow.io \
+PACT_BROKER_TOKEN=your_pactflow_token \
 npx @modelcontextprotocol/inspector node dist/index.js
 
 ```
@@ -313,10 +391,10 @@ npx @modelcontextprotocol/inspector node dist/index.js
 
 Once configured, you can interact with SmartBear tools through natural language queries in your AI assistant. Here are examples based on the available tools:
 
-### Insight Hub Error Investigation
+### BugSnag Error Investigation
 
--   "Help me fix this crash from Insight Hub: https://app.bugsnag.com/my-org/my-project/errors/1a2b3c4d5e6f7g8h9i0j1k2l?&event_id=1a2b3c4d5e6f7g8h9i0j1k2l"
--   "What are my top events for the 'example' project in Insight Hub?"
+-   "Help me fix this crash from BugSnag: https://app.bugsnag.com/my-org/my-project/errors/1a2b3c4d5e6f7g8h9i0j1k2l?&event_id=1a2b3c4d5e6f7g8h9i0j1k2l"
+-   "What are my top events for the 'example' project in BugSnag?"
 -   "Show me the latest occurrence of error ID abc123 in project xyz789"
 -   "List all projects in my organization so I can investigate errors"
 -   "Get details about the most recent event for this specific error"
@@ -330,13 +408,19 @@ Once configured, you can interact with SmartBear tools through natural language 
 
 ### Cross-platform Debugging Workflows
 
--   "Compare this Insight Hub error with similar issues in our codebase"
+-   "Compare this BugSnag error with similar issues in our codebase"
 -   "Generate a debugging checklist based on this error's characteristics"
 -   "What patterns do you see in the user context and device information?"
 -   "Help me create a reproduction scenario based on this event data"
 
 ### Organization and Project Management
 
--   "What organizations do I have access to in Insight Hub?"
+-   "What organizations do I have access to in BugSnag?"
 -   "List all projects in organization org_12345"
 -   "Show me project details for the mobile app project"
+
+### API Hub Contract Testing (PactFlow)
+
+-   "List all the provider states for the current provider"
+-   "Generate Pact tests from this OpenAPI spec: [spec link]"
+-   "Review this Pact test and suggest improvements"

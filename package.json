@@ -1,13 +1,14 @@
 {
   "name": "@smartbear/mcp",
-  "version": "0.2.2",
+  "version": "0.4.0",
   "description": "MCP server for interacting SmartBear Products",
   "keywords": [
     "smartbear",
     "mcp",
-    "insight-hub",
+    "bugsnag",
     "reflect",
-    "api-hub"
+    "api-hub",
+    "pactflow"
   ],
   "homepage": "https://developer.smartbear.com/smartbear-mcp",
   "repository": {
