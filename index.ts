@@ -7,6 +7,7 @@ import { ReflectClient } from "./reflect/client.js";
 import { ApiHubClient } from "./api-hub/client.js";
 import { SmartBearMcpServer } from "./common/server.js";
 import { PactflowClient } from "./pactflow/client.js";
+import { BitBarClient } from "./bitbar/client.js";
 
 // This is used to report errors in the MCP server itself
 // If you want to use your own BugSnag API key, set the MCP_SERVER_BUGSNAG_API_KEY environment variable
@@ -25,6 +26,7 @@ async function main() {
   const pactBrokerUrl = process.env.PACT_BROKER_BASE_URL;
   const pactBrokerUsername = process.env.PACT_BROKER_USERNAME;
   const pactBrokerPassword = process.env.PACT_BROKER_PASSWORD;
+  const bitbarApiKey = process.env.BITBAR_API_KEY;
 
   let client_defined = false;
 
@@ -61,9 +63,14 @@ async function main() {
     }
   }
 
+  if (bitbarApiKey) {
+    server.addClient(new BitBarClient(bitbarApiKey));
+    client_defined = true;
+  }
+
   if (!client_defined) {
     console.error(
-      "Please set one of REFLECT_API_TOKEN, BUGSNAG_AUTH_TOKEN, API_HUB_API_KEY or PACT_BROKER_BASE_URL / (and relevant Pact auth) environment variables",
+      "Please set one of REFLECT_API_TOKEN, BUGSNAG_AUTH_TOKEN, API_HUB_API_KEY, BITBAR_API_KEY or PACT_BROKER_BASE_URL / (and relevant Pact auth) environment variables",
     );
     process.exit(1);
   }

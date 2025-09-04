@@ -49,6 +49,7 @@ export type Parameters = Array<{
 }>;
 
 export interface Client {
+    registerPrompts?(register: RegisterToolsFunction, getInput: GetInputFunction): void;
     name: string;
     prefix: string;
     registerTools(register: RegisterToolsFunction, getInput: GetInputFunction): void;
