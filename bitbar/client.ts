@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from "../common/info.js";
-import { Client } from "../common/types.js";
+import { Client, GetInputFunction, RegisterToolsFunction, RegisterResourceFunction } from "../common/types.js";
 
 // Type definitions for tool arguments
 export interface ProjectArgs {
@@ -62,11 +62,14 @@ export interface DeviceSessionArgs {
 
 // BitBar API client implementing the Client interface
 export class BitBarClient implements Client {
+  name = "BitBar";
+  prefix = "bitbar";
+  
   private headers: { 
     "Authorization": string; 
     "User-Agent": string;
   };
-  private baseUrl = "https://cloud.bitbar.com/api";
+  private baseUrl = "https://cloud.bitbar.com/api/v2";
 
   constructor(apiKey: string) {
     // BitBar uses Basic Auth with API key as username and empty password
@@ -351,9 +354,7 @@ export class BitBarClient implements Client {
   }
 
   async listTestRuns(projectId?: string): Promise<any> {
-    const url = projectId 
-      ? `${this.baseUrl}/me/projects/${projectId}/runs`
-      : `${this.baseUrl}/me/runs`;
+    const url = `${this.baseUrl}/me/runs`;
     
     const response = await fetch(url, {
       method: "GET",
@@ -1316,38 +1317,49 @@ class BitBarAppiumTest(unittest.TestCase):
     }
   }
 
-  registerTools(server: McpServer): void {
+  registerTools(register: RegisterToolsFunction, getInput: GetInputFunction): void {
     // User/Account Tools
-    server.tool(
-      "bitbar_get_user",
-      "Get current BitBar user information",
-      {},
+    register(
+      {
+        title: "Get User",
+        summary: "Get current BitBar user information",
+        parameters: [],
+      },
       async (_args, _extra) => {
         const response = await this.getUser();
         return {
           content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
         };
-      }
+      },
     );
 
     // Project Management Tools
-    server.tool(
-      "bitbar_list_projects",
-      "List all BitBar projects",
-      {},
+    register(
+      {
+        title: "List Projects",
+        summary: "List all BitBar projects",
+        parameters: [],
+      },
       async (_args, _extra) => {
         const response = await this.listProjects();
         return {
           content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
         };
-      }
+      },
     );
 
-    server.tool(
-      "bitbar_get_project",
-      "Get details of a specific BitBar project",
+    register(
       {
-        projectId: z.string().describe("ID of the project to retrieve"),
+        title: "Get Project",
+        summary: "Get details of a specific BitBar project",
+        parameters: [
+          {
+            name: "projectId",
+            type: z.string(),
+            required: true,
+            description: "ID of the project to retrieve",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.projectId) throw new Error("projectId argument is required");
@@ -1355,35 +1367,84 @@ class BitBarAppiumTest(unittest.TestCase):
         return {
           content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
         };
-      }
+      },
     );
 
-    server.tool(
-      "bitbar_create_project",
-      "Create a new BitBar project",
+    register(
       {
-        name: z.string().optional().describe("Name of the project (auto-generated if not provided)"),
-        description: z.string().optional().describe("Description of the project"),
-        archivingStrategy: z.string().optional().describe("Archiving strategy for the project"),
-        archivingItemCount: z.number().optional().describe("Number of items to keep when archiving"),
+        title: "Create Project",
+        summary: "Create a new BitBar project",
+        parameters: [
+          {
+            name: "name",
+            type: z.string().optional(),
+            required: false,
+            description: "Name of the project (auto-generated if not provided)",
+          },
+          {
+            name: "description",
+            type: z.string().optional(),
+            required: false,
+            description: "Description of the project",
+          },
+          {
+            name: "archivingStrategy",
+            type: z.string().optional(),
+            required: false,
+            description: "Archiving strategy for the project",
+          },
+          {
+            name: "archivingItemCount",
+            type: z.number().optional(),
+            required: false,
+            description: "Number of items to keep when archiving",
+          },
+        ],
       },
       async (args, _extra) => {
         const response = await this.createProject(args);
         return {
           content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
         };
-      }
+      },
     );
 
-    server.tool(
-      "bitbar_update_project",
-      "Update an existing BitBar project",
+    register(
       {
-        projectId: z.string().describe("ID of the project to update"),
-        name: z.string().optional().describe("New name for the project"),
-        description: z.string().optional().describe("New description for the project"),
-        archivingStrategy: z.string().optional().describe("New archiving strategy"),
-        archivingItemCount: z.number().optional().describe("New archiving item count"),
+        title: "Update Project",
+        summary: "Update an existing BitBar project",
+        parameters: [
+          {
+            name: "projectId",
+            type: z.string(),
+            required: true,
+            description: "ID of the project to update",
+          },
+          {
+            name: "name",
+            type: z.string().optional(),
+            required: false,
+            description: "New name for the project",
+          },
+          {
+            name: "description",
+            type: z.string().optional(),
+            required: false,
+            description: "New description for the project",
+          },
+          {
+            name: "archivingStrategy",
+            type: z.string().optional(),
+            required: false,
+            description: "New archiving strategy",
+          },
+          {
+            name: "archivingItemCount",
+            type: z.number().optional(),
+            required: false,
+            description: "New archiving item count",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.projectId) throw new Error("projectId argument is required");
@@ -1392,14 +1453,16 @@ class BitBarAppiumTest(unittest.TestCase):
         return {
           content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
         };
-      }
+      },
     );
 
     // Device Management Tools
-    server.tool(
-      "bitbar_list_devices",
-      "List all available BitBar devices supporting pagination",
-      {},
+    register(
+      {
+        title: "List Devices",
+        summary: "List all available BitBar devices supporting pagination",
+        parameters: [],
+      },
       async (_args, _extra) => {
         const response = await this.listDevices();
         return {
@@ -1408,10 +1471,12 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_list_device_groups",
-      "List all BitBar device groups",
-      {},
+    register(
+      {
+        title: "List Device Groups",
+        summary: "List all BitBar device groups",
+        parameters: [],
+      },
       async (_args, _extra) => {
         const response = await this.listDeviceGroups();
         return {
@@ -1420,11 +1485,18 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_get_device_group",
-      "Get details of a specific device group",
+    register(
       {
-        deviceGroupId: z.string().describe("ID of the device group to retrieve"),
+        title: "Get Device Group",
+        summary: "Get details of a specific device group",
+        parameters: [
+          {
+            name: "deviceGroupId",
+            type: z.string(),
+            required: true,
+            description: "ID of the device group to retrieve",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.deviceGroupId) throw new Error("deviceGroupId argument is required");
@@ -1436,10 +1508,12 @@ class BitBarAppiumTest(unittest.TestCase):
     );
 
     // File Management Tools
-    server.tool(
-      "bitbar_list_files",
-      "List all BitBar files",
-      {},
+    register(
+      {
+        title: "List Files",
+        summary: "List all BitBar files",
+        parameters: [],
+      },
       async (_args, _extra) => {
         const response = await this.listFiles();
         return {
@@ -1448,11 +1522,18 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_get_file",
-      "Get details of a specific file",
+    register(
       {
-        fileId: z.string().describe("ID of the file to retrieve"),
+        title: "Get File",
+        summary: "Get details of a specific file",
+        parameters: [
+          {
+            name: "fileId",
+            type: z.string(),
+            required: true,
+            description: "ID of the file to retrieve",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.fileId) throw new Error("fileId argument is required");
@@ -1463,13 +1544,30 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_upload_file",
-      "Upload a new file to BitBar",
+    register(
       {
-        filePath: z.string().describe("Path to the file to upload"),
-        filename: z.string().optional().describe("Custom filename (optional, will use file basename if not provided)"),
-        contentType: z.string().optional().describe("MIME type of the file (optional, will be auto-detected)"),
+        title: "Upload File",
+        summary: "Upload a new file to BitBar",
+        parameters: [
+          {
+            name: "filePath",
+            type: z.string(),
+            required: true,
+            description: "Path to the file to upload",
+          },
+          {
+            name: "filename",
+            type: z.string().optional(),
+            required: false,
+            description: "Custom filename (optional, will use file basename if not provided)",
+          },
+          {
+            name: "contentType",
+            type: z.string().optional(),
+            required: false,
+            description: "MIME type of the file (optional, will be auto-detected)",
+          },
+        ],
       },
       async (args, _extra) => {
         try {
@@ -1581,11 +1679,18 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_download_file",
-      "Download a file from BitBar",
+    register(
       {
-        fileId: z.string().describe("ID of the file to download"),
+        title: "Download File",
+        summary: "Download a file from BitBar",
+        parameters: [
+          {
+            name: "fileId",
+            type: z.string(),
+            required: true,
+            description: "ID of the file to download",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.fileId) throw new Error("fileId argument is required");
@@ -1605,12 +1710,24 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_update_file_name",
-      "Update the name of an existing file",
+    register(
       {
-        fileId: z.string().describe("ID of the file to update"),
-        filename: z.string().describe("New name for the file"),
+        title: "Update File Name",
+        summary: "Update the name of an existing file",
+        parameters: [
+          {
+            name: "fileId",
+            type: z.string(),
+            required: true,
+            description: "ID of the file to update",
+          },
+          {
+            name: "filename",
+            type: z.string(),
+            required: true,
+            description: "New name for the file",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.fileId || !args.filename) {
@@ -1623,14 +1740,36 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_update_file_content",
-      "Update the content of an existing file",
+    register(
       {
-        fileId: z.string().describe("ID of the file to update"),
-        filename: z.string().describe("Name of the file"),
-        fileContent: z.string().describe("Base64 encoded new file content"),
-        contentType: z.string().optional().describe("MIME type of the file"),
+        title: "Update File Content",
+        summary: "Update the content of an existing file",
+        parameters: [
+          {
+            name: "fileId",
+            type: z.string(),
+            required: true,
+            description: "ID of the file to update",
+          },
+          {
+            name: "filename",
+            type: z.string(),
+            required: true,
+            description: "Name of the file",
+          },
+          {
+            name: "fileContent",
+            type: z.string(),
+            required: true,
+            description: "Base64 encoded new file content",
+          },
+          {
+            name: "contentType",
+            type: z.string().optional(),
+            required: false,
+            description: "MIME type of the file",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.fileId || !args.filename || !args.fileContent) {
@@ -1645,10 +1784,12 @@ class BitBarAppiumTest(unittest.TestCase):
     );
 
     // Framework and Test Tools
-    server.tool(
-      "bitbar_list_frameworks",
-      "List all available testing frameworks",
-      {},
+    register(
+      {
+        title: "List Frameworks",
+        summary: "List all available testing frameworks",
+        parameters: [],
+      },
       async (_args, _extra) => {
         const response = await this.listFrameworks();
         return {
@@ -1657,26 +1798,93 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_create_test_run",
-      "Create and start a new test run",
+    register(
       {
-        osType: z.enum(["ANDROID", "IOS", "DESKTOP"]).describe("Operating system type"),
-        projectId: z.string().describe("ID of the project for the test run"),
-        files: z.array(z.object({
-          id: z.string(),
-          action: z.enum(["COPY_TO_DEVICE", "INSTALL", "RUN_TEST"]).optional(),
-        })).describe("Array of file configurations"),
-        frameworkId: z.string().describe("ID of the testing framework"),
-        deviceGroupId: z.string().optional().describe("ID of the device group"),
-        deviceIds: z.array(z.string()).optional().describe("Array of specific device IDs"),
-        testRunName: z.string().optional().describe("Name for the test run"),
-        scheduler: z.enum(["PARALLEL", "SERIAL", "SINGLE", "ALL_INSTANCES"]).optional().describe("Test execution scheduler"),
-        timeout: z.number().optional().describe("Timeout for the test run"),
-        videoRecordingEnabled: z.boolean().optional().describe("Enable video recording"),
-        screenshotDir: z.string().optional().describe("Directory for screenshots"),
-        maxAutoRetriesCount: z.number().optional().describe("Maximum auto retry count"),
-        hookURL: z.string().optional().describe("Webhook URL for notifications"),
+        title: "Create Test Run",
+        summary: "Create and start a new test run",
+        parameters: [
+          {
+            name: "osType",
+            type: z.enum(["ANDROID", "IOS", "DESKTOP"]),
+            required: true,
+            description: "Operating system type",
+          },
+          {
+            name: "projectId",
+            type: z.string(),
+            required: true,
+            description: "ID of the project for the test run",
+          },
+          {
+            name: "files",
+            type: z.array(z.object({
+              id: z.string(),
+              action: z.enum(["COPY_TO_DEVICE", "INSTALL", "RUN_TEST"]).optional(),
+            })),
+            required: true,
+            description: "Array of file configurations",
+          },
+          {
+            name: "frameworkId",
+            type: z.string(),
+            required: true,
+            description: "ID of the testing framework",
+          },
+          {
+            name: "deviceGroupId",
+            type: z.string().optional(),
+            required: false,
+            description: "ID of the device group",
+          },
+          {
+            name: "deviceIds",
+            type: z.array(z.string()).optional(),
+            required: false,
+            description: "Array of specific device IDs",
+          },
+          {
+            name: "testRunName",
+            type: z.string().optional(),
+            required: false,
+            description: "Name for the test run",
+          },
+          {
+            name: "scheduler",
+            type: z.enum(["PARALLEL", "SERIAL", "SINGLE", "ALL_INSTANCES"]).optional(),
+            required: false,
+            description: "Test execution scheduler",
+          },
+          {
+            name: "timeout",
+            type: z.number().optional(),
+            required: false,
+            description: "Timeout for the test run",
+          },
+          {
+            name: "videoRecordingEnabled",
+            type: z.boolean().optional(),
+            required: false,
+            description: "Enable video recording",
+          },
+          {
+            name: "screenshotDir",
+            type: z.string().optional(),
+            required: false,
+            description: "Directory for screenshots",
+          },
+          {
+            name: "maxAutoRetriesCount",
+            type: z.number().optional(),
+            required: false,
+            description: "Maximum auto retry count",
+          },
+          {
+            name: "hookURL",
+            type: z.string().optional(),
+            required: false,
+            description: "Webhook URL for notifications",
+          },
+        ],
       },
       async (args, _extra) => {
         const requiredFields: (keyof CreateTestRunArgs)[] = ["osType", "projectId", "files", "frameworkId"];
@@ -1693,11 +1901,18 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_list_test_runs",
-      "List test runs for a project or user",
+    register(
       {
-        projectId: z.string().optional().describe("ID of the project (if not provided, lists all user's test runs)"),
+        title: "List Test Runs",
+        summary: "List test runs for a project or user",
+        parameters: [
+          {
+            name: "projectId",
+            type: z.string().optional(),
+            required: false,
+            description: "ID of the project (if not provided, lists all user's test runs)",
+          },
+        ],
       },
       async (args, _extra) => {
         const response = await this.listTestRuns(args.projectId);
@@ -1707,11 +1922,18 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_get_test_run",
-      "Get details of a specific test run",
+    register(
       {
-        runId: z.string().describe("ID of the test run to retrieve"),
+        title: "Get Test Run",
+        summary: "Get details of a specific test run",
+        parameters: [
+          {
+            name: "runId",
+            type: z.string(),
+            required: true,
+            description: "ID of the test run to retrieve",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.runId) throw new Error("runId argument is required");
@@ -1722,11 +1944,18 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_abort_test_run",
-      "Abort a running test",
+    register(
       {
-        runId: z.string().describe("ID of the test run to abort"),
+        title: "Abort Test Run",
+        summary: "Abort a running test",
+        parameters: [
+          {
+            name: "runId",
+            type: z.string(),
+            required: true,
+            description: "ID of the test run to abort",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.runId) throw new Error("runId argument is required");
@@ -1738,11 +1967,18 @@ class BitBarAppiumTest(unittest.TestCase):
     );
 
     // Device Session Tools
-    server.tool(
-      "bitbar_list_device_sessions",
-      "List device sessions for a test run",
+    register(
       {
-        runId: z.string().describe("ID of the test run"),
+        title: "List Device Sessions",
+        summary: "List device sessions for a test run",
+        parameters: [
+          {
+            name: "runId",
+            type: z.string(),
+            required: true,
+            description: "ID of the test run",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.runId) throw new Error("runId argument is required");
@@ -1753,11 +1989,18 @@ class BitBarAppiumTest(unittest.TestCase):
       }
     );
 
-    server.tool(
-      "bitbar_get_device_session",
-      "Get details of a specific device session",
+    register(
       {
-        sessionId: z.string().describe("ID of the device session"),
+        title: "Get Device Session",
+        summary: "Get details of a specific device session",
+        parameters: [
+          {
+            name: "sessionId",
+            type: z.string(),
+            required: true,
+            description: "ID of the device session",
+          },
+        ],
       },
       async (args, _extra) => {
         if (!args.sessionId) throw new Error("sessionId argument is required");
@@ -1769,24 +2012,46 @@ class BitBarAppiumTest(unittest.TestCase):
     );
 
     // BitBar Test Package Creation Tool
-    server.tool(
-      "bitbar_create_ios_test_pkg",
-      "Create a complete iOS test package for BitBar with consistent naming format: {iOS-Project-Name}_test_pkg_{2025m01d15h14m30}. This tool validates that it's running in an iOS application project directory and automatically extracts both the iOS project name and bundle ID from the project configuration. The zip filename uses auto-detected project name with timestamp format {YYYY}m{MM}d{DD}h{HH}m{mm}. Accepts JSON format from error-repro-details prompt with device requirements and reproduction steps that are automatically converted to Appium code.",
+    register(
       {
-        bundleId: z.string().optional().describe("iOS app bundle ID override (optional, will auto-detect from project if not provided)"),
-        testSteps: z.string().optional().describe("Human-written test steps as a numbered list (legacy format) OR JSON string from error-repro-details prompt with device_requirements and reproduction_steps arrays"),
-        reproductionData: z.object({
-          device_requirements: z.object({
-            device_model: z.string().optional(),
-            operating_system: z.string().optional()
-          }).optional(),
-          reproduction_steps: z.array(z.object({
-            timestamp: z.string().optional(),
-            action: z.string(),
-            appium_selector: z.string()
-          })).optional()
-        }).optional().describe("Structured JSON data from error-repro-details prompt containing device requirements and reproduction steps"),
-        projectName: z.string().optional().describe("Project name for the package filename (optional, will detect from current directory)"),
+        title: "Create iOS Test Package",
+        summary: "Create a complete iOS test package for BitBar with consistent naming format: {iOS-Project-Name}_test_pkg_{2025m01d15h14m30}. This tool validates that it's running in an iOS application project directory and automatically extracts both the iOS project name and bundle ID from the project configuration. The zip filename uses auto-detected project name with timestamp format {YYYY}m{MM}d{DD}h{HH}m{mm}. Accepts JSON format from error-repro-details prompt with device requirements and reproduction steps that are automatically converted to Appium code.",
+        parameters: [
+          {
+            name: "bundleId",
+            type: z.string().optional(),
+            required: false,
+            description: "iOS app bundle ID override (optional, will auto-detect from project if not provided)",
+          },
+          {
+            name: "testSteps",
+            type: z.string().optional(),
+            required: false,
+            description: "Human-written test steps as a numbered list (legacy format) OR JSON string from error-repro-details prompt with device_requirements and reproduction_steps arrays",
+          },
+          {
+            name: "reproductionData",
+            type: z.object({
+              device_requirements: z.object({
+                device_model: z.string().optional(),
+                operating_system: z.string().optional()
+              }).optional(),
+              reproduction_steps: z.array(z.object({
+                timestamp: z.string().optional(),
+                action: z.string(),
+                appium_selector: z.string()
+              })).optional()
+            }).optional(),
+            required: false,
+            description: "Structured JSON data from error-repro-details prompt containing device requirements and reproduction steps",
+          },
+          {
+            name: "projectName",
+            type: z.string().optional(),
+            required: false,
+            description: "Project name for the package filename (optional, will detect from current directory)",
+          },
+        ],
       },
       async (args, _extra) => {
         let bundleId: string | undefined;
@@ -1995,16 +2260,48 @@ class BitBarAppiumTest(unittest.TestCase):
     );
 
     // BitBar IPA Build Tool
-    server.tool(
-      "bitbar_build_ipa",
-      "Build an iOS IPA file for BitBar testing using Xcode build and export commands. This tool validates that it's running in an iOS application project directory, automatically detects the project name, creates an archive, and exports it as an IPA file with consistent naming format: {iOS-Project-Name}_{YYYY}m{MM}d{DD}h{HH}m{mm}.ipa. Requires Xcode and valid iOS project configuration.",
+    register(
       {
-        scheme: z.string().optional().describe("Xcode scheme name to build (optional, will auto-detect if not provided)"),
-        configuration: z.string().optional().describe("Build configuration (Debug/Release, defaults to Release)"),
-        archivePath: z.string().optional().describe("Custom archive path (optional, defaults to ./build/{ProjectName}.xcarchive)"),
-        exportPath: z.string().optional().describe("Custom export directory path (optional, defaults to ./build/Export/)"),
-        exportOptionsPlist: z.string().optional().describe("Custom ExportOptions.plist path (optional, will create default if not provided)"),
-        projectName: z.string().optional().describe("Project name for the IPA filename (optional, will detect from current directory)"),
+        title: "Build IPA",
+        summary: "Build an iOS IPA file for BitBar testing using Xcode build and export commands. This tool validates that it's running in an iOS application project directory, automatically detects the project name, creates an archive, and exports it as an IPA file with consistent naming format: {iOS-Project-Name}_{YYYY}m{MM}d{DD}h{HH}m{mm}.ipa. Requires Xcode and valid iOS project configuration.",
+        parameters: [
+          {
+            name: "scheme",
+            type: z.string().optional(),
+            required: false,
+            description: "Xcode scheme name to build (optional, will auto-detect if not provided)",
+          },
+          {
+            name: "configuration",
+            type: z.string().optional(),
+            required: false,
+            description: "Build configuration (Debug/Release, defaults to Release)",
+          },
+          {
+            name: "archivePath",
+            type: z.string().optional(),
+            required: false,
+            description: "Custom archive path (optional, defaults to ./build/{ProjectName}.xcarchive)",
+          },
+          {
+            name: "exportPath",
+            type: z.string().optional(),
+            required: false,
+            description: "Custom export directory path (optional, defaults to ./build/Export/)",
+          },
+          {
+            name: "exportOptionsPlist",
+            type: z.string().optional(),
+            required: false,
+            description: "Custom ExportOptions.plist path (optional, will create default if not provided)",
+          },
+          {
+            name: "projectName",
+            type: z.string().optional(),
+            required: false,
+            description: "Project name for the IPA filename (optional, will detect from current directory)",
+          },
+        ],
       },
       async (args, _extra) => {
         try {
@@ -2295,24 +2592,46 @@ class BitBarAppiumTest(unittest.TestCase):
     );
 
     // BitBar Complete iOS Test Flow Tool
-    server.tool(
-      "bitbar_replay_session",
-      "Complete iOS test workflow that orchestrates the entire testing process: 1) Generate test package from reproduction steps, 2) Build IPA file, 3) Upload both files to BitBar, 4) Start test run on specified device. This tool chains together bitbar_create_ios_test_pkg, bitbar_build_ipa, bitbar_upload_file, and bitbar_create_test_run to provide end-to-end iOS testing automation.",
+    register(
       {
-        reproductionSteps: z.object({
-          device_requirements: z.object({
-            device_model: z.string().optional(),
-            operating_system: z.string().optional()
-          }).optional(),
-          reproduction_steps: z.array(z.object({
-            timestamp: z.string().optional(),
-            action: z.string(),
-            appium_selector: z.string()
-          })).optional()
-        }).describe("JSON format reproduction steps from error-repro-details prompt containing device requirements and reproduction steps"),
-        projectId: z.string().describe("BitBar project ID where the test run will be created"),
-        testRunName: z.string().optional().describe("Custom name for the test run (optional, will auto-generate if not provided)"),
-        bundleId: z.string().optional().describe("iOS app bundle ID override (optional, will auto-detect from project if not provided)"),
+        title: "Replay Session",
+        summary: "Complete iOS test workflow that orchestrates the entire testing process: 1) Generate test package from reproduction steps, 2) Build IPA file, 3) Upload both files to BitBar, 4) Start test run on specified device. This tool chains together bitbar_create_ios_test_pkg, bitbar_build_ipa, bitbar_upload_file, and bitbar_create_test_run to provide end-to-end iOS testing automation.",
+        parameters: [
+          {
+            name: "reproductionSteps",
+            type: z.object({
+              device_requirements: z.object({
+                device_model: z.string().optional(),
+                operating_system: z.string().optional()
+              }).optional(),
+              reproduction_steps: z.array(z.object({
+                timestamp: z.string().optional(),
+                action: z.string(),
+                appium_selector: z.string()
+              })).optional()
+            }),
+            required: true,
+            description: "JSON format reproduction steps from error-repro-details prompt containing device requirements and reproduction steps",
+          },
+          {
+            name: "projectId",
+            type: z.string(),
+            required: true,
+            description: "BitBar project ID where the test run will be created",
+          },
+          {
+            name: "testRunName",
+            type: z.string().optional(),
+            required: false,
+            description: "Custom name for the test run (optional, will auto-generate if not provided)",
+          },
+          {
+            name: "bundleId",
+            type: z.string().optional(),
+            required: false,
+            description: "iOS app bundle ID override (optional, will auto-detect from project if not provided)",
+          },
+        ],
       },
       async (args, _extra) => {
         let testPackageResult: any = null;
@@ -2877,10 +3196,10 @@ class BitBarAppiumTest(unittest.TestCase):
     );
   }
 
-  registerResources(server: McpServer): void {
-    server.resource(
+  registerResources(register: RegisterResourceFunction): void {
+    register(
       "ios_test_requirements",
-      new ResourceTemplate("bitbar://templates/requirements.txt", { list: undefined }),
+      "bitbar://templates/requirements.txt",
       async (uri) => {
         try {
           const requirementsContent = `Appium-Python-Client==2.11.1
@@ -2900,9 +3219,9 @@ xmlrunner==1.7.7`;
       }
     );
 
-    server.resource(
+    register(
       "ios_test_run_tests_sh",
-      new ResourceTemplate("bitbar://templates/run-tests.sh", { list: undefined }),
+      "bitbar://templates/run-tests.sh",
       async (uri) => {
         try {
           const runTestsContent = `#!/bin/bash
@@ -2986,9 +3305,9 @@ mv test-reports/*.xml TEST-all.xml`;
       }
     );
 
-    server.resource(
+    register(
       "ios_test_app_script",
-      new ResourceTemplate("bitbar://templates/BitBarAppTest.py", { list: undefined }),
+      "bitbar://templates/BitBarAppTest.py",
       async (uri) => {
         try {
           // Extract test_steps from URI parameters
@@ -3052,9 +3371,9 @@ if __name__ == '__main__':
       }
     );
 
-    server.resource(
+    register(
       "ios_test_appium_script",
-      new ResourceTemplate("bitbar://templates/BitBarAppiumTest.py", { list: undefined }),
+      "bitbar://templates/BitBarAppiumTest.py",
       async (uri) => {
         try {
           // Extract bundle_id from URI parameters

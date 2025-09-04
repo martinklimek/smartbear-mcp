@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from '../../../common/info.js';
-import { InsightHubClient } from '../../../insight-hub/client.js';
-import { BaseAPI } from '../../../insight-hub/client/api/base.js';
-import { ProjectAPI } from '../../../insight-hub/client/api/Project.js';
-import { CurrentUserAPI, ErrorAPI } from '../../../insight-hub/client/index.js';
+import { BugsnagClient } from '../../../bugsnag/client.js';
+import { BaseAPI } from '../../../bugsnag/client/api/base.js';
+import { ProjectAPI } from '../../../bugsnag/client/api/Project.js';
+import { CurrentUserAPI, ErrorAPI } from '../../../bugsnag/client/index.js';
 
 // Mock the dependencies
 const mockCurrentUserAPI = {
@@ -32,13 +32,13 @@ const mockCache = {
   del: vi.fn()
 };
 
-vi.mock('../../../insight-hub/client/index.js', () => ({
+vi.mock('../../../bugsnag/client/index.js', () => ({
   CurrentUserAPI: vi.fn().mockImplementation(() => mockCurrentUserAPI),
   ErrorAPI: vi.fn().mockImplementation(() => mockErrorAPI),
   Configuration: vi.fn().mockImplementation((config) => config)
 }));
 
-vi.mock('../../../insight-hub/client/api/Project.js', () => ({
+vi.mock('../../../bugsnag/client/api/Project.js', () => ({
   ProjectAPI: vi.fn().mockImplementation(() => mockProjectAPI)
 }));
 
@@ -52,29 +52,29 @@ vi.mock('../../../common/bugsnag.js', () => ({
   }
 }));
 
-describe('InsightHubClient', () => {
-  let client: InsightHubClient;
+describe('BugsnagClient', () => {
+  let client: BugsnagClient;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    client = new InsightHubClient('test-token');
+    client = new BugsnagClient('test-token');
   });
 
   describe('constructor', () => {
     it('should create client instance with proper dependencies', () => {
-      const client = new InsightHubClient('test-token');
-      expect(client).toBeInstanceOf(InsightHubClient);
+      const client = new BugsnagClient('test-token');
+      expect(client).toBeInstanceOf(BugsnagClient);
     });
 
     it('should configure endpoints correctly during construction', async () => {
-      const { Configuration } = await import('../../../insight-hub/client/index.js');
+      const { Configuration } = await import('../../../bugsnag/client/index.js');
       const MockedConfiguration = vi.mocked(Configuration);
 
-      new InsightHubClient('test-token', '00000hub-key');
+      new BugsnagClient('test-token', '00000hub-key');
 
       expect(MockedConfiguration).toHaveBeenCalledWith(
         expect.objectContaining({
-          basePath: 'https://api.insighthub.smartbear.com',
+          basePath: 'https://api.bugsnag.smartbear.com',
           authToken: 'test-token',
           headers: expect.objectContaining({
             'User-Agent': `${MCP_SERVER_NAME}/${MCP_SERVER_VERSION}`,
@@ -87,38 +87,38 @@ describe('InsightHubClient', () => {
     });
 
     it('should set project API key when provided', () => {
-      const client = new InsightHubClient('test-token', 'test-project-key');
-      expect(client).toBeInstanceOf(InsightHubClient);
+      const client = new BugsnagClient('test-token', 'test-project-key');
+      expect(client).toBeInstanceOf(BugsnagClient);
     });
   });
 
   describe('getEndpoint method', () => {
-    let client: InsightHubClient;
+    let client: BugsnagClient;
 
     beforeEach(() => {
-      client = new InsightHubClient('test-token');
+      client = new BugsnagClient('test-token');
     });
 
     describe('without custom endpoint', () => {
       describe('with Hub API key (00000 prefix)', () => {
         it('should return Hub domain for api subdomain', () => {
           const result = client.getEndpoint('api', '00000hub-key');
-          expect(result).toBe('https://api.insighthub.smartbear.com');
+          expect(result).toBe('https://api.bugsnag.smartbear.com');
         });
 
         it('should return Hub domain for app subdomain', () => {
           const result = client.getEndpoint('app', '00000test-key');
-          expect(result).toBe('https://app.insighthub.smartbear.com');
+          expect(result).toBe('https://app.bugsnag.smartbear.com');
         });
 
         it('should return Hub domain for custom subdomain', () => {
           const result = client.getEndpoint('custom', '00000key');
-          expect(result).toBe('https://custom.insighthub.smartbear.com');
+          expect(result).toBe('https://custom.bugsnag.smartbear.com');
         });
 
         it('should handle empty string after prefix', () => {
           const result = client.getEndpoint('api', '00000');
-          expect(result).toBe('https://api.insighthub.smartbear.com');
+          expect(result).toBe('https://api.bugsnag.smartbear.com');
         });
       });
 
@@ -165,33 +165,33 @@ describe('InsightHubClient', () => {
     describe('with custom endpoint', () => {
       describe('Hub domain endpoints (always normalized)', () => {
         it('should normalize to HTTPS subdomain for exact hub domain match', () => {
-          const result = client.getEndpoint('api', '00000key', 'https://api.insighthub.smartbear.com');
-          expect(result).toBe('https://api.insighthub.smartbear.com');
+          const result = client.getEndpoint('api', '00000key', 'https://api.bugsnag.smartbear.com');
+          expect(result).toBe('https://api.bugsnag.smartbear.com');
         });
 
         it('should normalize to HTTPS subdomain regardless of input protocol', () => {
-          const result = client.getEndpoint('api', '00000key', 'http://app.insighthub.smartbear.com');
-          expect(result).toBe('https://api.insighthub.smartbear.com');
+          const result = client.getEndpoint('api', '00000key', 'http://app.bugsnag.smartbear.com');
+          expect(result).toBe('https://api.bugsnag.smartbear.com');
         });
 
         it('should normalize to HTTPS subdomain regardless of input subdomain', () => {
-          const result = client.getEndpoint('app', '00000key', 'https://api.insighthub.smartbear.com');
-          expect(result).toBe('https://app.insighthub.smartbear.com');
+          const result = client.getEndpoint('app', '00000key', 'https://api.bugsnag.smartbear.com');
+          expect(result).toBe('https://app.bugsnag.smartbear.com');
         });
 
         it('should normalize hub domain with port', () => {
-          const result = client.getEndpoint('api', '00000key', 'https://custom.insighthub.smartbear.com:8080');
-          expect(result).toBe('https://api.insighthub.smartbear.com');
+          const result = client.getEndpoint('api', '00000key', 'https://custom.bugsnag.smartbear.com:8080');
+          expect(result).toBe('https://api.bugsnag.smartbear.com');
         });
 
         it('should normalize hub domain with path', () => {
-          const result = client.getEndpoint('api', '00000key', 'https://custom.insighthub.smartbear.com/path');
-          expect(result).toBe('https://api.insighthub.smartbear.com');
+          const result = client.getEndpoint('api', '00000key', 'https://custom.bugsnag.smartbear.com/path');
+          expect(result).toBe('https://api.bugsnag.smartbear.com');
         });
 
         it('should normalize complex subdomains to standard format', () => {
-          const result = client.getEndpoint('api', '00000key', 'https://staging.app.insighthub.smartbear.com');
-          expect(result).toBe('https://api.insighthub.smartbear.com');
+          const result = client.getEndpoint('api', '00000key', 'https://staging.app.bugsnag.smartbear.com');
+          expect(result).toBe('https://api.bugsnag.smartbear.com');
         });
       });
 
@@ -270,8 +270,8 @@ describe('InsightHubClient', () => {
         });
 
         it('should normalize known domains even with userinfo', () => {
-          const result = client.getEndpoint('api', '00000key', 'https://user:pass@app.insighthub.smartbear.com');
-          expect(result).toBe('https://api.insighthub.smartbear.com');
+          const result = client.getEndpoint('api', '00000key', 'https://user:pass@app.bugsnag.smartbear.com');
+          expect(result).toBe('https://api.bugsnag.smartbear.com');
         });
       });
     });
@@ -279,12 +279,12 @@ describe('InsightHubClient', () => {
     describe('subdomain validation', () => {
       it('should handle empty subdomain', () => {
         const result = client.getEndpoint('', '00000key');
-        expect(result).toBe('https://.insighthub.smartbear.com');
+        expect(result).toBe('https://.bugsnag.smartbear.com');
       });
 
       it('should handle subdomain with special characters', () => {
         const result = client.getEndpoint('test-api_v2', '00000key');
-        expect(result).toBe('https://test-api_v2.insighthub.smartbear.com');
+        expect(result).toBe('https://test-api_v2.bugsnag.smartbear.com');
       });
 
       it('should handle numeric subdomain', () => {
@@ -295,7 +295,7 @@ describe('InsightHubClient', () => {
       it('should handle very long subdomains', () => {
         const longSubdomain = 'very-long-subdomain-name-with-many-characters';
         const result = client.getEndpoint(longSubdomain, '00000key');
-        expect(result).toBe(`https://${longSubdomain}.insighthub.smartbear.com`);
+        expect(result).toBe(`https://${longSubdomain}.bugsnag.smartbear.com`);
       });
     });
   });
@@ -303,7 +303,7 @@ describe('InsightHubClient', () => {
   describe('static utility methods', () => {
     // Test static methods if they exist in the class
     it('should have proper class structure', () => {
-      const client = new InsightHubClient('test-token');
+      const client = new BugsnagClient('test-token');
 
       // Verify the client has expected methods
       expect(typeof client.initialize).toBe('function');
@@ -315,28 +315,28 @@ describe('InsightHubClient', () => {
   describe('error handling', () => {
     it('should handle invalid tokens gracefully during construction', () => {
       expect(() => {
-        new InsightHubClient('');
+        new BugsnagClient('');
       }).not.toThrow();
 
       expect(() => {
-        new InsightHubClient('   ');
+        new BugsnagClient('   ');
       }).not.toThrow();
     });
 
     it('should handle special characters in project API key', () => {
       expect(() => {
-        new InsightHubClient('test-token', '00000-special!@#$%^&*()');
+        new BugsnagClient('test-token', '00000-special!@#$%^&*()');
       }).not.toThrow();
     });
   });
 
   describe('configuration validation', () => {
     it('should pass correct authToken to Configuration', async () => {
-      const { Configuration } = await import('../../../insight-hub/client/index.js');
+      const { Configuration } = await import('../../../bugsnag/client/index.js');
       const MockedConfiguration = vi.mocked(Configuration);
       const testToken = 'super-secret-token-123';
 
-      new InsightHubClient(testToken);
+      new BugsnagClient(testToken);
 
       expect(MockedConfiguration).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -346,10 +346,10 @@ describe('InsightHubClient', () => {
     });
 
     it('should include all required headers', async () => {
-      const { Configuration } = await import('../../../insight-hub/client/index.js');
+      const { Configuration } = await import('../../../bugsnag/client/index.js');
       const MockedConfiguration = vi.mocked(Configuration);
 
-      new InsightHubClient('test-token');
+      new BugsnagClient('test-token');
 
       const configCall = MockedConfiguration.mock.calls[0][0];
       expect(configCall.headers).toEqual({
@@ -363,8 +363,8 @@ describe('InsightHubClient', () => {
 
   describe('API client initialization', () => {
     it('should initialize all required API clients', async () => {
-      const { CurrentUserAPI, ErrorAPI } = await import('../../../insight-hub/client/index.js');
-      const { ProjectAPI } = await import('../../../insight-hub/client/api/Project.js');
+      const { CurrentUserAPI, ErrorAPI } = await import('../../../bugsnag/client/index.js');
+      const { ProjectAPI } = await import('../../../bugsnag/client/api/Project.js');
 
       const MockedCurrentUserAPI = vi.mocked(CurrentUserAPI);
       const MockedErrorAPI = vi.mocked(ErrorAPI);
@@ -375,7 +375,7 @@ describe('InsightHubClient', () => {
       MockedErrorAPI.mockClear();
       MockedProjectAPI.mockClear();
 
-      new InsightHubClient('test-token');
+      new BugsnagClient('test-token');
 
       expect(MockedCurrentUserAPI).toHaveBeenCalledOnce();
       expect(MockedErrorAPI).toHaveBeenCalledOnce();
@@ -389,7 +389,7 @@ describe('InsightHubClient', () => {
       // Clear previous calls from beforeEach
       MockedNodeCache.mockClear();
 
-      new InsightHubClient('test-token');
+      new BugsnagClient('test-token');
 
       expect(MockedNodeCache).toHaveBeenCalledOnce();
     });
@@ -413,12 +413,12 @@ describe('InsightHubClient', () => {
 
       expect(mockCurrentUserAPI.listUserOrganizations).toHaveBeenCalledOnce();
       expect(mockCurrentUserAPI.getOrganizationProjects).toHaveBeenCalledWith('org-1', { paginate: true });
-      expect(mockCache.set).toHaveBeenCalledWith('insight_hub_org', mockOrg);
-      expect(mockCache.set).toHaveBeenCalledWith('insight_hub_projects', mockProjects);
+      expect(mockCache.set).toHaveBeenCalledWith('bugsnag_org', mockOrg);
+      expect(mockCache.set).toHaveBeenCalledWith('bugsnag_projects', mockProjects);
     });
 
     it('should initialize with project API key and set up event filters', async () => {
-      const clientWithApiKey = new InsightHubClient('test-token', 'project-api-key');
+      const clientWithApiKey = new BugsnagClient('test-token', 'project-api-key');
       const mockProjects = [
         { id: 'proj-1', name: 'Project 1', api_key: 'project-api-key' },
         { id: 'proj-2', name: 'Project 2', api_key: 'other-key' }
@@ -436,12 +436,12 @@ describe('InsightHubClient', () => {
 
       await clientWithApiKey.initialize();
 
-      expect(mockCache.set).toHaveBeenCalledWith('insight_hub_current_project', mockProjects[0]);
+      expect(mockCache.set).toHaveBeenCalledWith('bugsnag_current_project', mockProjects[0]);
       expect(mockProjectAPI.listProjectEventFields).toHaveBeenCalledWith('proj-1');
 
       // // Verify that 'search' field is filtered out
       const filteredFields = mockEventFields.filter(field => field.display_id !== 'search');
-      expect(mockCache.set).toHaveBeenCalledWith('insight_hub_current_project_event_filters', filteredFields);
+      expect(mockCache.set).toHaveBeenCalledWith('bugsnag_current_project_event_filters', filteredFields);
     });
 
     it('should throw error when no organizations found', async () => {
@@ -451,7 +451,7 @@ describe('InsightHubClient', () => {
     });
 
     it('should throw error when project with API key not found', async () => {
-      const clientWithApiKey = new InsightHubClient('test-token', 'non-existent-key');
+      const clientWithApiKey = new BugsnagClient('test-token', 'non-existent-key');
       const mockOrg = { id: 'org-1', name: 'Test Org' };
       const mockProject = { id: 'proj-1', name: 'Project 1', api_key: 'other-key' };
 
@@ -464,7 +464,7 @@ describe('InsightHubClient', () => {
     });
 
     it('should throw error when no event fields found for project', async () => {
-      const clientWithApiKey = new InsightHubClient('test-token', 'project-api-key');
+      const clientWithApiKey = new BugsnagClient('test-token', 'project-api-key');
       const mockOrg = { id: 'org-1', name: 'Test Org' };
       const mockProjects = [
         { id: 'proj-1', name: 'Project 1', api_key: 'project-api-key' }
@@ -488,7 +488,7 @@ describe('InsightHubClient', () => {
 
         const result = await client.getProjects();
 
-        expect(mockCache.get).toHaveBeenCalledWith('insight_hub_projects');
+        expect(mockCache.get).toHaveBeenCalledWith('bugsnag_projects');
         expect(result).toEqual(mockProjects);
       });
 
@@ -504,7 +504,7 @@ describe('InsightHubClient', () => {
         const result = await client.getProjects();
 
         expect(mockCurrentUserAPI.getOrganizationProjects).toHaveBeenCalledWith('org-1', { paginate: true });
-        expect(mockCache.set).toHaveBeenCalledWith('insight_hub_projects', mockProjects);
+        expect(mockCache.set).toHaveBeenCalledWith('bugsnag_projects', mockProjects);
         expect(result).toEqual(mockProjects);
       });
 
@@ -559,77 +559,72 @@ describe('InsightHubClient', () => {
   });
 
   describe('tool registration', () => {
-    let mockServer: any;
+    let registerToolsSpy: any;
+    let getInputFunctionSpy: any;
 
     beforeEach(() => {
-      mockServer = {
-        registerTool: vi.fn(),
-        resource: vi.fn()
-      };
+      registerToolsSpy = vi.fn();
+      getInputFunctionSpy = vi.fn();
     });
 
-    it('should register list_insight_hub_projects tool when no project API key', () => {
-      client.registerTools(mockServer);
+    it('should register list_projects tool when no project API key', () => {
+      client.registerTools(registerToolsSpy, getInputFunctionSpy);
 
-      expect(mockServer.registerTool).toHaveBeenCalledWith(
-        'list_insight_hub_projects',
+      expect(registerToolsSpy).toBeCalledWith(
         expect.any(Object),
         expect.any(Function)
       );
     });
 
-    it('should not register list_insight_hub_projects tool when project API key is provided', () => {
-      const clientWithApiKey = new InsightHubClient('test-token', 'project-api-key');
-      clientWithApiKey.registerTools(mockServer);
+    it('should not register list_projects tool when project API key is provided', () => {
+      const clientWithApiKey = new BugsnagClient('test-token', 'project-api-key');
+      clientWithApiKey.registerTools(registerToolsSpy, getInputFunctionSpy);
 
-      const registeredTools = mockServer.registerTool.mock.calls.map((call: any) => call[0]);
-      expect(registeredTools).not.toContain('list_insight_hub_projects');
+      const registeredTools = registerToolsSpy.mock.calls.map((call: any) => call[0].title);
+      expect(registeredTools).not.toContain('List Projects');
     });
 
     it('should register common tools regardless of project API key', () => {
-      client.registerTools(mockServer);
+      client.registerTools(registerToolsSpy, getInputFunctionSpy);
 
-      const registeredTools = mockServer.registerTool.mock.calls.map((call: any) => call[0]);
-      expect(registeredTools).toContain('get_insight_hub_error');
-      expect(registeredTools).toContain('get_insight_hub_event_details');
-      expect(registeredTools).toContain('list_insight_hub_project_errors');
-      expect(registeredTools).toContain('get_project_event_filters');
-      expect(registeredTools).toContain('update_error');
+      const registeredTools = registerToolsSpy.mock.calls.map((call: any) => call[0].title);
+      expect(registeredTools).toContain('Get Error');
+      expect(registeredTools).toContain('Get Event Details');
+      expect(registeredTools).toContain('List Project Errors');
+      expect(registeredTools).toContain('List Project Event Filters');
+      expect(registeredTools).toContain('Update Error');
     });
   });
 
   describe('resource registration', () => {
-    let mockServer: any;
+    let registerResourcesSpy: any;
 
     beforeEach(() => {
-      mockServer = {
-        registerTool: vi.fn(),
-        resource: vi.fn()
-      };
+      registerResourcesSpy = vi.fn();
     });
 
-    it('should register insight_hub_event resource', () => {
-      client.registerResources(mockServer);
+    it('should register event resource', () => {
+      client.registerResources(registerResourcesSpy);
 
-      expect(mockServer.resource).toHaveBeenCalledWith(
-        'insight_hub_event',
-        expect.any(Object),
+      expect(registerResourcesSpy).toHaveBeenCalledWith(
+        'event',
+        '{id}',
         expect.any(Function)
       );
     });
   });
 
   describe('tool handlers', () => {
-    let mockServer: any;
+
+    let registerToolsSpy: any;
+    let getInputFunctionSpy: any;
 
     beforeEach(() => {
-      mockServer = {
-        registerTool: vi.fn(),
-        resource: vi.fn()
-      };
+      registerToolsSpy = vi.fn();
+      getInputFunctionSpy = vi.fn();
     });
 
-    describe('list_insight_hub_projects tool handler', () => {
+    describe('list_projects tool handler', () => {
       it('should return projects with pagination', async () => {
         const mockProjects = [
           { id: 'proj-1', name: 'Project 1' },
@@ -638,9 +633,9 @@ describe('InsightHubClient', () => {
         ];
         mockCache.get.mockReturnValue(mockProjects);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'list_insight_hub_projects')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Projects')[1];
 
         const result = await toolHandler({ page_size: 2, page: 1 });
 
@@ -655,9 +650,9 @@ describe('InsightHubClient', () => {
         const mockProjects = [{ id: 'proj-1', name: 'Project 1' }];
         mockCache.get.mockReturnValue(mockProjects);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'list_insight_hub_projects')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Projects')[1];
 
         const result = await toolHandler({});
 
@@ -671,9 +666,9 @@ describe('InsightHubClient', () => {
       it('should handle no projects found', async () => {
         mockCache.get.mockReturnValue([]);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'list_insight_hub_projects')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Projects')[1];
 
         const result = await toolHandler({});
 
@@ -688,9 +683,9 @@ describe('InsightHubClient', () => {
         ];
         mockCache.get.mockReturnValue(mockProjects);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'list_insight_hub_projects')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Projects')[1];
 
         const result = await toolHandler({ page_size: 2 });
 
@@ -708,9 +703,9 @@ describe('InsightHubClient', () => {
         }));
         mockCache.get.mockReturnValue(mockProjects);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'list_insight_hub_projects')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Projects')[1];
 
         const result = await toolHandler({ page: 2 });
 
@@ -723,7 +718,7 @@ describe('InsightHubClient', () => {
       });
     });
 
-    describe('get_insight_hub_error tool handler', () => {
+    describe('get_error tool handler', () => {
       it('should get error details with project from cache', async () => {
         const mockProject = { id: 'proj-1', name: 'Project 1', slug: 'my-project' };
         const mockError = { id: 'error-1', message: 'Test error' };
@@ -737,9 +732,9 @@ describe('InsightHubClient', () => {
         mockErrorAPI.listEventsOnProject.mockResolvedValue({ body: mockEvents });
         mockErrorAPI.listErrorPivots.mockResolvedValue({ body: mockPivots });
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_insight_hub_error')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Get Error')[1];
 
         const result = await toolHandler({ errorId: 'error-1' });
 
@@ -755,15 +750,15 @@ describe('InsightHubClient', () => {
       });
 
       it('should throw error when required arguments missing', async () => {
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_insight_hub_error')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Get Error')[1];
 
         await expect(toolHandler({})).rejects.toThrow('Both projectId and errorId arguments are required');
       });
     });
 
-    describe('get_insight_hub_event_details tool handler', () => {
+    describe('get_bugsnag_event_details tool handler', () => {
       it('should get event details from dashboard URL', async () => {
         const mockProjects = [{ id: 'proj-1', slug: 'my-project', name: 'My Project' }];
         const mockEvent = { id: 'event-1', project_id: 'proj-1' };
@@ -771,9 +766,9 @@ describe('InsightHubClient', () => {
         mockCache.get.mockReturnValue(mockProjects);
         mockErrorAPI.viewEventById.mockResolvedValue({ body: mockEvent });
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_insight_hub_event_details')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Get Event Details')[1];
 
         const result = await toolHandler({
           link: 'https://app.bugsnag.com/my-org/my-project/errors/error-123?event_id=event-1'
@@ -784,9 +779,9 @@ describe('InsightHubClient', () => {
       });
 
       it('should throw error when link is invalid', async () => {
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_insight_hub_event_details')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Get Event Details')[1];
 
         await expect(toolHandler({ link: 'invalid-url' })).rejects.toThrow();
       });
@@ -794,9 +789,9 @@ describe('InsightHubClient', () => {
       it('should throw error when project not found', async () => {
         mockCache.get.mockReturnValue([{ id: 'proj-1', slug: 'other-project', name: 'Other Project' }]);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_insight_hub_event_details')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Get Event Details')[1];
 
         await expect(toolHandler({
           link: 'https://app.bugsnag.com/my-org/my-project/errors/error-123?event_id=event-1'
@@ -804,9 +799,9 @@ describe('InsightHubClient', () => {
       });
 
       it('should throw error when URL is missing required parameters', async () => {
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_insight_hub_event_details')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Get Event Details')[1];
 
         await expect(toolHandler({
           link: 'https://app.bugsnag.com/my-org/my-project/errors/error-123' // Missing event_id
@@ -814,7 +809,7 @@ describe('InsightHubClient', () => {
       });
     });
 
-    describe('list_insight_hub_project_errors tool handler', () => {
+    describe('list_project_errors tool handler', () => {
       it('should list project errors with filters', async () => {
         const mockProject = { id: 'proj-1', name: 'Project 1' };
         const mockEventFields = [
@@ -827,18 +822,22 @@ describe('InsightHubClient', () => {
         mockCache.get
           .mockReturnValueOnce(mockProject) // current project
           .mockReturnValueOnce(mockEventFields); // event fields
-        mockErrorAPI.listProjectErrors.mockResolvedValue({ body: mockErrors });
+        mockErrorAPI.listProjectErrors.mockResolvedValue({ 
+          body: mockErrors,
+          headers: new Headers({ 'X-Total-Count': '1' })
+        });
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'list_insight_hub_project_errors')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Project Errors')[1];
 
-        const result = await toolHandler({ filters });
+        const result = await toolHandler({ filters, sort: 'last_seen', direction: 'desc', per_page: 50 });
 
-        expect(mockErrorAPI.listProjectErrors).toHaveBeenCalledWith('proj-1', { filters });
+        expect(mockErrorAPI.listProjectErrors).toHaveBeenCalledWith('proj-1', { filters, sort: 'last_seen', direction: 'desc', per_page: 50 });
         const expectedResult = {
           data: mockErrors,
-          count: 1
+          count: 1,
+          total: 1
         };
         expect(result.content[0].text).toBe(JSON.stringify(expectedResult));
       });
@@ -852,9 +851,9 @@ describe('InsightHubClient', () => {
           .mockReturnValueOnce(mockProject)
           .mockReturnValueOnce(mockEventFields);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'list_insight_hub_project_errors')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Project Errors')[1];
 
         await expect(toolHandler({ filters })).rejects.toThrow('Invalid filter key: invalid.field');
       });
@@ -862,9 +861,9 @@ describe('InsightHubClient', () => {
       it('should throw error when no project ID available', async () => {
         mockCache.get.mockReturnValue(null);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'list_insight_hub_project_errors')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Project Errors')[1];
 
         await expect(toolHandler({})).rejects.toThrow('No current project found. Please provide a projectId or configure a project API key.');
       });
@@ -878,9 +877,9 @@ describe('InsightHubClient', () => {
         ];
         mockCache.get.mockReturnValue(mockEventFields);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_project_event_filters')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Project Event Filters')[1];
 
         const result = await toolHandler({});
 
@@ -890,9 +889,9 @@ describe('InsightHubClient', () => {
       it('should throw error when no event filters in cache', async () => {
         mockCache.get.mockReturnValue(null);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_project_event_filters')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'List Project Event Filters')[1];
 
         await expect(toolHandler({})).rejects.toThrow('No event filters found in cache.');
       });
@@ -905,9 +904,9 @@ describe('InsightHubClient', () => {
         mockCache.get.mockReturnValue(mockProject);
         mockErrorAPI.updateErrorOnProject.mockResolvedValue({ status: 200 });
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'update_error')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Update Error')[1];
 
         const result = await toolHandler({
           errorId: 'error-1',
@@ -929,9 +928,9 @@ describe('InsightHubClient', () => {
         mockCache.get.mockReturnValue(mockProjects);
         mockErrorAPI.updateErrorOnProject.mockResolvedValue({ status: 204 });
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'update_error')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Update Error')[1];
 
         const result = await toolHandler({
           projectId: 'proj-1',
@@ -955,9 +954,9 @@ describe('InsightHubClient', () => {
         mockCache.get.mockReturnValue(mockProject);
         mockErrorAPI.updateErrorOnProject.mockResolvedValue({ status: 200 });
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'update_error')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Update Error')[1];
 
         for (const operation of operations) {
           await toolHandler({
@@ -977,29 +976,25 @@ describe('InsightHubClient', () => {
 
       it('should handle override_severity operation with elicitInput', async () => {
         const mockProject = { id: 'proj-1', name: 'Project 1' };
-        const mockServerWithElicitInput = {
-          registerTool: vi.fn(),
-          server: {
-            elicitInput: vi.fn().mockResolvedValue({
+
+        getInputFunctionSpy.mockResolvedValue({
               action: 'accept',
               content: { severity: 'warning' }
-            })
-          }
-        } as any;
+            });
 
         mockCache.get.mockReturnValue(mockProject);
         mockErrorAPI.updateErrorOnProject.mockResolvedValue({ status: 200 });
 
-        client.registerTools(mockServerWithElicitInput);
-        const toolHandler = mockServerWithElicitInput.registerTool.mock.calls
-          .find((call: any) => call[0] === 'update_error')![2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Update Error')[1];
 
         const result = await toolHandler({
           errorId: 'error-1',
           operation: 'override_severity'
         });
 
-        expect(mockServerWithElicitInput.server.elicitInput).toHaveBeenCalledWith({
+        expect(getInputFunctionSpy).toHaveBeenCalledWith({
           message: "Please provide the new severity for the error (e.g. 'info', 'warning', 'error', 'critical')",
           requestedSchema: {
             type: "object",
@@ -1024,21 +1019,17 @@ describe('InsightHubClient', () => {
 
       it('should handle override_severity operation when elicitInput is rejected', async () => {
         const mockProject = { id: 'proj-1', name: 'Project 1' };
-        const mockServerWithElicitInput = {
-          registerTool: vi.fn(),
-          server: {
-            elicitInput: vi.fn().mockResolvedValue({
+
+        getInputFunctionSpy.mockResolvedValue({
               action: 'reject'
-            })
-          }
-        } as any;
+            });
 
         mockCache.get.mockReturnValue(mockProject);
         mockErrorAPI.updateErrorOnProject.mockResolvedValue({ status: 200 });
 
-        client.registerTools(mockServerWithElicitInput);
-        const toolHandler = mockServerWithElicitInput.registerTool.mock.calls
-          .find((call: any) => call[0] === 'update_error')![2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Update Error')[1];
 
         const result = await toolHandler({
           errorId: 'error-1',
@@ -1059,9 +1050,9 @@ describe('InsightHubClient', () => {
         mockCache.get.mockReturnValue(mockProject);
         mockErrorAPI.updateErrorOnProject.mockResolvedValue({ status: 400 });
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'update_error')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Update Error')[1];
 
         const result = await toolHandler({
           errorId: 'error-1',
@@ -1074,9 +1065,9 @@ describe('InsightHubClient', () => {
       it('should throw error when no project found', async () => {
         mockCache.get.mockReturnValue(null);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'update_error')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Update Error')[1];
 
         await expect(toolHandler({
           errorId: 'error-1',
@@ -1089,9 +1080,9 @@ describe('InsightHubClient', () => {
 
         mockCache.get.mockReturnValue(mockProjects);
 
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'update_error')[2];
+        client.registerTools(registerToolsSpy, getInputFunctionSpy);
+        const toolHandler = registerToolsSpy.mock.calls
+          .find((call: any) => call[0].title === 'Update Error')[1];
 
         await expect(toolHandler({
           projectId: 'non-existent-project',
@@ -1099,89 +1090,17 @@ describe('InsightHubClient', () => {
           operation: 'fix'
         })).rejects.toThrow('Project with ID non-existent-project not found.');
       });
-
-      it('should notify Bugsnag when API call fails', async () => {
-        const Bugsnag = (await import('../../../common/bugsnag.js')).default;
-        const mockProject = { id: 'proj-1', name: 'Project 1' };
-        const mockError = new Error('API error');
-
-        mockCache.get.mockReturnValue(mockProject);
-        mockErrorAPI.updateErrorOnProject.mockRejectedValue(mockError);
-
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'update_error')[2];
-
-        await expect(toolHandler({
-          errorId: 'error-1',
-          operation: 'fix'
-        })).rejects.toThrow('API error');
-
-        expect(Bugsnag.notify).toHaveBeenCalledWith(mockError);
-      });
-    });
-
-    describe('error handling in tool handlers', () => {
-      it('should notify Bugsnag when error occurs in list_insight_hub_projects', async () => {
-        const Bugsnag = (await import('../../../common/bugsnag.js')).default;
-        const mockError = new Error('Test error');
-        mockCache.get.mockImplementation(() => {
-          throw mockError;
-        });
-
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'list_insight_hub_projects')[2];
-
-        await expect(toolHandler({})).rejects.toThrow('Test error');
-        expect(Bugsnag.notify).toHaveBeenCalledWith(mockError);
-      });
-
-      it('should notify Bugsnag when error occurs in get_insight_hub_error', async () => {
-        const Bugsnag = (await import('../../../common/bugsnag.js')).default;
-        const mockError = new Error('API error');
-        const mockProject = { id: 'proj-1', name: 'Project 1' };
-
-        mockCache.get.mockReturnValue(mockProject);
-        mockErrorAPI.viewErrorOnProject.mockRejectedValue(mockError);
-
-        client.registerTools(mockServer);
-        const toolHandler = mockServer.registerTool.mock.calls
-          .find((call: any) => call[0] === 'get_insight_hub_error')[2];
-
-        await expect(toolHandler({ errorId: 'error-1' })).rejects.toThrow('API error');
-        expect(Bugsnag.notify).toHaveBeenCalledWith(mockError);
-      });
-
-      it('should notify Bugsnag when error occurs in resource handler', async () => {
-        const Bugsnag = (await import('../../../common/bugsnag.js')).default;
-        const mockError = new Error('Resource error');
-
-        mockCache.get.mockRejectedValue(mockError);
-
-        client.registerResources(mockServer);
-        const resourceHandler = mockServer.resource.mock.calls[0][2];
-
-        await expect(resourceHandler(
-          { href: 'insighthub://event/event-1' },
-          { id: 'event-1' }
-        )).rejects.toThrow('Resource error');
-        expect(Bugsnag.notify).toHaveBeenCalledWith(mockError);
-      });
     });
   });
 
   describe('resource handlers', () => {
-    let mockServer: any;
+    let registerResourcesSpy: any;
 
     beforeEach(() => {
-      mockServer = {
-        registerTool: vi.fn(),
-        resource: vi.fn()
-      };
+      registerResourcesSpy = vi.fn();
     });
 
-    describe('insight_hub_event resource handler', () => {
+    describe('bugsnag_event resource handler', () => {
       it('should find event by ID across projects', async () => {
         const mockEvent = { id: 'event-1', project_id: 'proj-1' };
         const mockProjects = [{ id: 'proj-1', name: 'Project 1' }];
@@ -1189,15 +1108,15 @@ describe('InsightHubClient', () => {
         mockCache.get.mockReturnValueOnce(mockProjects);
         mockErrorAPI.viewEventById.mockResolvedValue({ body: mockEvent });
 
-        client.registerResources(mockServer);
-        const resourceHandler = mockServer.resource.mock.calls[0][2];
+        client.registerResources(registerResourcesSpy);
+        const resourceHandler = registerResourcesSpy.mock.calls[0][2];
 
         const result = await resourceHandler(
-          { href: 'insighthub://event/event-1' },
+          { href: 'bugsnag://event/event-1' },
           { id: 'event-1' }
         );
 
-        expect(result.contents[0].uri).toBe('insighthub://event/event-1');
+        expect(result.contents[0].uri).toBe('bugsnag://event/event-1');
         expect(result.contents[0].text).toBe(JSON.stringify(mockEvent));
       });
     });

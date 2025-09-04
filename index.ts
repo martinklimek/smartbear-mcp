@@ -1,76 +1,78 @@
 #!/usr/bin/env node
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import Bugsnag from "./common/bugsnag.js";
-import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from "./common/info.js";
-import { InsightHubClient } from "./insight-hub/client.js";
+import { BugsnagClient } from "./bugsnag/client.js";
 import { ReflectClient } from "./reflect/client.js";
 import { ApiHubClient } from "./api-hub/client.js";
+import { SmartBearMcpServer } from "./common/server.js";
+import { PactflowClient } from "./pactflow/client.js";
 import { BitBarClient } from "./bitbar/client.js";
 
 // This is used to report errors in the MCP server itself
-// If you want to use your own BugSnag API key, set the MCP_SERVER_INSIGHT_HUB_API_KEY environment variable
-const McpServerBugsnagAPIKey = process.env.MCP_SERVER_INSIGHT_HUB_API_KEY;
+// If you want to use your own BugSnag API key, set the MCP_SERVER_BUGSNAG_API_KEY environment variable
+const McpServerBugsnagAPIKey = process.env.MCP_SERVER_BUGSNAG_API_KEY;
 if (McpServerBugsnagAPIKey) {
   Bugsnag.start(McpServerBugsnagAPIKey);
 }
 
 async function main() {
-  const server = new McpServer(
-    {
-      name: MCP_SERVER_NAME,
-      version: MCP_SERVER_VERSION,
-    },
-    {
-      capabilities: {
-        resources: { listChanged: true }, // Server supports dynamic resource lists
-        tools: { listChanged: true }, // Server supports dynamic tool lists
-      },
-    },
-  );
+  const server = new SmartBearMcpServer();
 
   const reflectToken = process.env.REFLECT_API_TOKEN;
-  const insightHubToken = process.env.INSIGHT_HUB_AUTH_TOKEN;
+  const bugsnagToken = process.env.BUGSNAG_AUTH_TOKEN;
   const apiHubToken = process.env.API_HUB_API_KEY;
+  const pactBrokerToken = process.env.PACT_BROKER_TOKEN;
+  const pactBrokerUrl = process.env.PACT_BROKER_BASE_URL;
+  const pactBrokerUsername = process.env.PACT_BROKER_USERNAME;
+  const pactBrokerPassword = process.env.PACT_BROKER_PASSWORD;
   const bitbarApiKey = process.env.BITBAR_API_KEY;
 
-  if (!reflectToken && !insightHubToken && !apiHubToken && !bitbarApiKey) {
-    console.error(
-      "Please set one of REFLECT_API_TOKEN, INSIGHT_HUB_AUTH_TOKEN, API_HUB_API_KEY, or BITBAR_API_KEY environment variables",
-    );
-    process.exit(1);
-  }
+  let client_defined = false;
 
   if (reflectToken) {
-    const reflectClient = new ReflectClient(reflectToken);
-    reflectClient.registerTools(server);
-    reflectClient.registerResources(server);
+    server.addClient(new ReflectClient(reflectToken));
+    client_defined = true;
   }
 
-  if (insightHubToken) {
-    const insightHubClient = new InsightHubClient(
-      insightHubToken,
-      process.env.INSIGHT_HUB_PROJECT_API_KEY,
-      process.env.INSIGHT_HUB_ENDPOINT
+  if (bugsnagToken) {
+    const bugsnagClient = new BugsnagClient(
+      bugsnagToken,
+      process.env.BUGSNAG_PROJECT_API_KEY,
+      process.env.BUGSNAG_ENDPOINT
     );
-    await insightHubClient.initialize();
-    insightHubClient.registerTools(server);
-    insightHubClient.registerResources(server);
-    if (insightHubClient.registerPrompts) {
-      insightHubClient.registerPrompts(server);
+    await bugsnagClient.initialize();
+    server.addClient(bugsnagClient);
+    client_defined = true;
+  }
+
+  if(apiHubToken) {
+    server.addClient(new ApiHubClient(apiHubToken));
+    client_defined = true;
+  }
+
+  if (pactBrokerUrl) {
+    if (pactBrokerToken) {
+      server.addClient(new PactflowClient(pactBrokerToken, pactBrokerUrl, "pactflow"));
+      client_defined = true;
+    } else if (pactBrokerUsername && pactBrokerPassword) {
+      server.addClient(new PactflowClient({ username: pactBrokerUsername, password: pactBrokerPassword }, pactBrokerUrl, "pact_broker"));
+      client_defined = true;
+    } else {
+      console.error("If the Pact Broker base URL is specified, you must specify either (a) a PactFlow token, or (b) a Pact Broker username and password pair.")
     }
   }
 
- if(apiHubToken) {
-    const apiHubClient = new ApiHubClient(apiHubToken);
-    apiHubClient.registerTools(server);
+  if (bitbarApiKey) {
+    server.addClient(new BitBarClient(bitbarApiKey));
+    client_defined = true;
   }
 
-  if (bitbarApiKey) {
-    const bitbarClient = new BitBarClient(bitbarApiKey);
-    bitbarClient.registerTools(server);
-    bitbarClient.registerResources(server);
+  if (!client_defined) {
+    console.error(
+      "Please set one of REFLECT_API_TOKEN, BUGSNAG_AUTH_TOKEN, API_HUB_API_KEY, BITBAR_API_KEY or PACT_BROKER_BASE_URL / (and relevant Pact auth) environment variables",
+    );
+    process.exit(1);
   }
 
   const transport = new StdioServerTransport();
