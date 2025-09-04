@@ -69,7 +69,7 @@ export class BitBarClient implements Client {
     "Authorization": string; 
     "User-Agent": string;
   };
-  private baseUrl = "https://cloud.bitbar.com/api";
+  private baseUrl = "https://cloud.bitbar.com/api/v2";
 
   constructor(apiKey: string) {
     // BitBar uses Basic Auth with API key as username and empty password
@@ -354,9 +354,7 @@ export class BitBarClient implements Client {
   }
 
   async listTestRuns(projectId?: string): Promise<any> {
-    const url = projectId 
-      ? `${this.baseUrl}/me/projects/${projectId}/runs`
-      : `${this.baseUrl}/me/runs`;
+    const url = `${this.baseUrl}/me/runs`;
     
     const response = await fetch(url, {
       method: "GET",
