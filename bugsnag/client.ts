@@ -49,51 +49,186 @@ export interface ErrorArgs extends ProjectArgs {
 export class BugsnagClient implements Client {
   registerPrompts(register: RegisterPromptsFunction): void {
     register(
-      "error-repro-details",
+      "error_repro_json",
       "Generate device requirements, exact reproduction steps and Appium test code from a Bugsnag error URL",
       {
         bugsnagUrl: z.string().describe("Bugsnag error URL (e.g., https://app.bugsnag.com/my-org/my-project/errors/6891bb2ba9cb01960d80ddaa)")
       },
-      async (args: any) => {
+      async (args) => {
         try {
           if (!args.bugsnagUrl) {
             throw new Error("bugsnagUrl argument is required");
           }
+
           // Parse the Bugsnag URL to extract error details
           const url = new URL(args.bugsnagUrl);
+          
           // Validate this is a Bugsnag URL
           if (!url.hostname.includes('bugsnag.com')) {
-            throw new Error("Invalid Bugsnag URL");
+            throw new Error("Invalid Bugsnag URL. Expected a URL from app.bugsnag.com");
           }
+
           // Extract error ID and project slug from the URL path
           // URL format: https://app.bugsnag.com/my-org/my-project/errors/6891bb2ba9cb01960d80ddaa
           const pathParts = url.pathname.split('/');
           if (pathParts.length < 5 || pathParts[3] !== 'errors') {
-            throw new Error("Invalid Bugsnag error URL format");
+            throw new Error("Invalid Bugsnag error URL format. Expected format: /org/project/errors/errorId");
           }
+
           const projectSlug = pathParts[2];
           const errorId = pathParts[4];
+
           if (!projectSlug || !errorId) {
-            throw new Error("Project slug or error ID missing in URL");
+            throw new Error("Could not extract project and error ID from URL path");
           }
+
           // Get the project id from list of projects
           const projects = await this.getProjects();
           const project = projects.find((p: any) => p.slug === projectSlug);
           if (!project) {
-            throw new Error("Project not found for slug: " + projectSlug);
+            throw new Error(`Project with slug '${projectSlug}' not found.`);
           }
+
           // Get the error details and latest event
           const errorDetails = (await this.errorsApi.viewErrorOnProject(project.id, errorId)).body;
           if (!errorDetails) {
-            throw new Error("Error not found for ID: " + errorId);
+            throw new Error(`Error with ID ${errorId} not found in project ${project.id}.`);
           }
+
           const latestEvent = (await this.errorsApi.viewLatestEventOnError(errorId)).body;
+
           return {
-            content: [{ type: "text", text: JSON.stringify({ errorDetails, latestEvent }) }]
+            description: `Reproduction steps and Appium code generated from Bugsnag error URL`,
+            messages: [
+              {
+                role: "user" as const,
+                content: {
+                  type: "text" as const,
+                  text: `# Error Reproduction Guide
+
+## Error Details
+**Error ID**: ${errorId}
+**Project**: ${projectSlug} (${project.name})
+**Error Message**: ${(errorDetails as any).error_class || 'N/A'}: ${(errorDetails as any).message || 'N/A'}
+**Status**: ${(errorDetails as any).status || 'N/A'}
+**First Seen**: ${(errorDetails as any).first_seen || 'N/A'}
+**Last Seen**: ${(errorDetails as any).last_seen || 'N/A'}
+**Event Count**: ${(errorDetails as any).events_count || 'N/A'}
+**URL**: ${args.bugsnagUrl}
+
+## Latest Event Context
+**Event ID**: ${(latestEvent as any)?.id || 'N/A'}
+**Occurred At**: ${(latestEvent as any)?.received_at || 'N/A'}
+**User**: ${(latestEvent as any)?.user?.email || (latestEvent as any)?.user?.id || 'Anonymous'}
+**App Version**: ${(latestEvent as any)?.app?.version || 'N/A'}
+**Release Stage**: ${(latestEvent as any)?.app?.release_stage || 'N/A'}
+## Device Information
+**Device Model**: ${(latestEvent as any)?.device?.model || 'N/A'}
+**Operating System**: ${(latestEvent as any)?.device?.os_name || 'N/A'} ${(latestEvent as any)?.device?.os_version || ''}
+**Browser**: ${(latestEvent as any)?.device?.browser_name || 'N/A'} ${(latestEvent as any)?.device?.browser_version || ''}
+**Screen Resolution**: ${(latestEvent as any)?.device?.screen_width || 'N/A'}x${(latestEvent as any)?.device?.screen_height || 'N/A'}
+**Orientation**: ${(latestEvent as any)?.device?.orientation || 'N/A'}
+**Memory**: ${(latestEvent as any)?.device?.total_memory || 'N/A'} MB
+**Free Memory**: ${(latestEvent as any)?.device?.free_memory || 'N/A'} MB
+
+## Stack Trace Summary
+${(latestEvent as any)?.exceptions?.[0]?.stacktrace?.map((frame: any, index: number) => 
+  `${index + 1}. ${frame.file || 'unknown'}:${frame.line_number || '?'} in ${frame.method || 'unknown function'}`
+).slice(0, 10).join('\n') || 'No stack trace available'}
+
+## User Actions Leading to Error (Breadcrumbs)
+${(latestEvent as any)?.breadcrumbs?.filter((breadcrumb: any) => {
+  // Only include navigation-related breadcrumbs
+  const type = breadcrumb?.type?.toLowerCase() || '';
+  const name = breadcrumb?.name?.toLowerCase() || '';
+  const message = breadcrumb?.message?.toLowerCase() || '';
+  
+  return type.includes('navigation') || type.includes('ui') || type.includes('user') ||
+         name.includes('tap') || name.includes('click') || name.includes('touch') ||
+         name.includes('button') || name.includes('switch') || name.includes('select') ||
+         message.includes('tap') || message.includes('click') || message.includes('touch');
+}).map((breadcrumb: any, index: number) => {
+  const timestamp = breadcrumb?.timestamp || 'unknown';
+  const action = breadcrumb?.name || breadcrumb?.message || 'user_action';
+  const metadataEntries = Object.entries(breadcrumb || {})
+    .filter(([key, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => key + ': ' + (typeof value === 'string' ? value : JSON.stringify(value)));
+  
+  return 'Navigation Step ' + (index + 1) + ':\\n' + metadataEntries.join('\\n');
+}).slice(-10).join('\\n\\n') || 'No navigation breadcrumbs available'}
+
+## Instructions for Reproduction
+
+Based on this error data, provide a JSON response with the following structure:
+
+1. **Device Requirements JSON** - Return device specifications in this exact format:
+{
+  "device_model": "extracted from device information above",
+  "operating_system": "extracted from device information above"
+}
+
+2. **Reproduction Steps JSON Array** - For each navigation breadcrumb above, create a JSON entry in this exact format:
+[
+  {
+    "timestamp": "extracted from breadcrumb timestamp",
+    "action": "extracted or inferred action name",
+    "appium_selector": "accessibility_id:extracted_element_id or xpath://element/path"
+  }
+]
+
+**Important Instructions**: 
+- Extract device_model and operating_system from the Device Information section above
+- Only process navigation-related breadcrumbs (ignore network requests, logs, etc.)
+- For appium_selector, try to extract element IDs from breadcrumb metadata or use descriptive selectors
+- Convert action names to specific action types based on element interaction:
+  - "tap_button" for button taps/clicks
+  - "switch_tab" for tab navigation/switches
+  - "tap_cell" for table/list cell selections
+  - "enter_text" for text input fields
+  - "swipe_screen" for swipe gestures
+  - "select_option" for picker/dropdown selections
+  - "toggle_switch" for on/off toggle controls
+  - "tap_element" for generic element taps
+- Return ONLY valid JSON - no explanatory text, markdown, or code blocks
+- Use the exact field names: device_model, operating_system, timestamp, action, appium_selector
+
+Expected JSON Output Format:
+{
+  "device_requirements": {
+    "device_model": "iPhone 16 Pro",
+    "operating_system": "iOS 16.6.1"
+  },
+  "reproduction_steps": [
+    {
+      "timestamp": "1754891404.265854",
+      "action": "tap_button",
+      "appium_selector": "accessibility_id:TestCrashButton"
+    },
+    {
+      "timestamp": "1754891405.123456",
+      "action": "switch_tab",
+      "appium_selector": "accessibility_id:SettingsTab"
+    }
+  ]
+}
+
+Note: Full error and event details are available via the Insight Hub dashboard at ${args.bugsnagUrl}`
+                }
+              }
+            ]
           };
-        } catch (error: any) {
+        } catch (error) {
           return {
-            content: [{ type: "text", text: `Error: ${error.message}` }]
+            description: "Error extracting data from Bugsnag URL",
+            messages: [
+              {
+                role: "user" as const,
+                content: {
+                  type: "text" as const,
+                  text: `Failed to extract error data from the provided Bugsnag URL: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease ensure the URL is a valid Bugsnag error URL in the format: https://app.bugsnag.com/org/project/errors/errorId`
+                }
+              }
+            ]
           };
         }
       }
